@@ -30,6 +30,7 @@ import motif.ast.IrField
 import motif.ast.IrMethod
 import motif.ast.IrModifier
 import motif.ast.IrType
+import java.util.Collections
 
 @OptIn(ExperimentalProcessingApi::class)
 class CompilerClass(override val env: XProcessingEnv, val declaredType: XType) : IrUtil, IrClass {

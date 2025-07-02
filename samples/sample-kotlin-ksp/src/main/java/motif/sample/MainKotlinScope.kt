@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Uber Technologies, Inc.
+ * Copyright (c) 2022 Uber Technologies, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,19 +13,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package motif.ast
+package motif.sample
 
-import kotlin.reflect.KClass
+import javax.inject.Named
+import motif.Creatable
+import motif.Scope
 
-interface IrAnnotation : IrEquivalence {
+@Scope(useNullFieldInitialization = true)
+interface MainKotlinScope : Creatable<MainKotlinScope.Dependencies> {
 
-  val className: String?
+  fun greeter(): Greeter
 
-  val type: IrType?
+  @motif.Objects
+  open class Objects {
 
-  val members: List<IrMethod>
+    @Named("name") fun name() = "World"
 
-  val annotationValueMap: Map<String, Any?>
+    fun greeter(@Named("name") name: String) = Greeter(name)
+  }
 
-  fun matchesClass(annotationClass: KClass<out Annotation>): Boolean
+  interface Dependencies
 }

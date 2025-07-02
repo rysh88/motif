@@ -34,8 +34,9 @@ public class BottomSheetController extends Controller<BottomSheetView> {
   protected void onAttach() {
     BottomHeaderView headerView = scope.header(view).view();
     view.showHeader(headerView);
-
-    PhotoListView photoListView = scope.photoList(this.view).view();
-    view.showPhotoList(photoListView);
+    if(scope.photoGridEnable()) {
+      PhotoListView photoListView = scope.photoList(this.view).view();
+      view.showPhotoList(photoListView);
+    }
   }
 }

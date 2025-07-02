@@ -19,7 +19,7 @@ import javax.inject.Named
 import motif.Creatable
 import motif.Scope
 
-@Scope
+@Scope(useNullFieldInitialization = true)
 interface MainScope : Creatable<MainScope.Dependencies> {
 
   fun greeter(): Greeter
@@ -29,7 +29,9 @@ interface MainScope : Creatable<MainScope.Dependencies> {
 
     @Named("name") fun name() = "World"
 
-    fun greeter(@Named("name") name: String) = Greeter(name)
+    @Named("version") fun versionCode() = 1
+
+    fun greeter(@Named("name") name: String, @Named("version") versionCode: Int) = Greeter("$name ${versionCode()}")
   }
 
   interface Dependencies

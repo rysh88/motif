@@ -28,7 +28,7 @@ import motif.ast.IrType
 @OptIn(ExperimentalProcessingApi::class)
 class CompilerAnnotation(val env: XProcessingEnv, val mirror: XAnnotation) : IrAnnotation {
 
-  override val className: String by lazy {
+    override val className: String by lazy {
     mirror.type.typeElement?.qualifiedName
         ?: throw IllegalStateException("Compiler annotation has no qualified class name")
   }
@@ -36,6 +36,9 @@ class CompilerAnnotation(val env: XProcessingEnv, val mirror: XAnnotation) : IrA
   private val pretty: String by lazy { mirror.toPrettyString() }
 
   override val type: IrType = CompilerType(env, mirror.type)
+
+  override val annotationValueMap: Map<String, Any?>
+    get() = mirror.annotationValues.associate { it.name to it.value }
 
   override val members: List<IrMethod> by lazy {
     val annotationMethods = mirror.type.typeElement?.getDeclaredMethods().orEmpty()
