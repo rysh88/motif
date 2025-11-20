@@ -42,6 +42,7 @@ class ScopeImpl(
     val scopeImplAnnotation: ScopeImplAnnotation,
     val objectsField: ObjectsField?,
     val dependenciesField: DependenciesField,
+    val cacheArrayField: CacheArrayField?,
     val cacheFields: List<CacheField>,
     val constructor: Constructor,
     val alternateConstructor: AlternateConstructor?,
@@ -93,6 +94,14 @@ class DependenciesField(val dependenciesClassName: ClassName, val name: String)
  * ```
  */
 class CacheField(val name: String)
+
+/**
+ * ```
+ * private final AtomicReferenceArray<Object> cache = new AtomicReferenceArray<>(150);
+ * ```
+ * Only present when cachingStrategy = ATOMIC_ARRAY.
+ */
+class CacheArrayField(val size: Int, val name: String = "cache")
 
 /**
  * ```

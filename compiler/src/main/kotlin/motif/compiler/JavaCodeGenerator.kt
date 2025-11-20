@@ -46,13 +46,27 @@ object JavaCodeGenerator {
             addSuperinterface(superClassName.j)
             objectsField?.let { addField(it.spec()) }
             addField(dependenciesField.spec())
+
+            // ATOMIC_ARRAY strategy: Add cache array field + index constants + helper method
+            cacheArrayField?.let { arrayField ->
+                addField(arrayField.spec())
+                addFields(arrayField.indexConstants(factoryProviderMethods))
+                addMethod(arrayField.getOrCreateHelper())
+            }
+
+            // VOLATILE_FIELDS strategy: Add individual cache fields
             cacheFields.forEach { addField(it.spec(useNullFieldInitialization)) }
+
             addMethod(constructor.spec())
             alternateConstructor?.let { addMethod(it.spec()) }
             accessMethodImpls.forEach { addMethod(it.spec()) }
             childMethodImpls.forEach { addMethod(it.spec()) }
             addMethod(scopeProviderMethod.spec())
-            factoryProviderMethods.forEach { addMethods(it.specs(useNullFieldInitialization)) }
+            factoryProviderMethods.forEach {
+                addMethods(it.specs(useNullFieldInitialization, cacheArrayField))
+                // Add create method for ATOMIC_ARRAY strategy
+                it.createMethodSpec(cacheArrayField)?.let { addMethod(it) }
+            }
             dependencyProviderMethods.forEach { addMethod(it.spec()) }
             dependencies?.let { addType(it.spec()) }
             objectsImpl?.let { addType(it.spec()) }
@@ -168,25 +182,45 @@ object JavaCodeGenerator {
   private fun ScopeProviderMethod.spec(): MethodSpec =
       MethodSpec.methodBuilder(name).returns(scopeClassName.j).addStatement("return this").build()
 
-  private fun FactoryProviderMethod.specs(useNullFieldInitialization: Boolean): List<MethodSpec> {
+  private fun FactoryProviderMethod.specs(
+      useNullFieldInitialization: Boolean,
+      cacheArrayField: CacheArrayField?
+  ): List<MethodSpec> {
     val primarySpec =
         MethodSpec.methodBuilder(name)
             .returns(returnTypeName.j)
-            .addStatement(body.spec(useNullFieldInitialization))
+            .addStatement(body.spec(useNullFieldInitialization, cacheArrayField, name))
             .build()
     val spreadSpecs = spreadProviderMethods.map { it.spec() }
     return listOf(primarySpec) + spreadSpecs
   }
 
-  private fun FactoryProviderMethodBody.spec(useNullFieldInitialization: Boolean): CodeBlock =
+  private fun FactoryProviderMethodBody.spec(
+      useNullFieldInitialization: Boolean,
+      cacheArrayField: CacheArrayField?,
+      providerMethodName: String
+  ): CodeBlock =
       when (this) {
-        is FactoryProviderMethodBody.Cached -> spec(useNullFieldInitialization)
+        is FactoryProviderMethodBody.Cached -> spec(useNullFieldInitialization, cacheArrayField, providerMethodName)
         is FactoryProviderMethodBody.Uncached -> spec()
       }
 
   private fun FactoryProviderMethodBody.Cached.spec(
       useNullFieldInitialization: Boolean,
+      cacheArrayField: CacheArrayField?,
+      providerMethodName: String
   ): CodeBlock {
+    // Strategy 1: ATOMIC_ARRAY
+    if (cacheArrayField != null) {
+        return CodeBlock.of(
+            "return \$N.getOrCreate(INDEX_\$N, this::create\$L)",
+            cacheArrayField.name,
+            providerMethodName,
+            providerMethodName.replaceFirstChar { it.uppercase() }
+        )
+    }
+
+    // Strategy 2: VOLATILE_FIELDS_NULL_INIT
     if (useNullFieldInitialization) {
       val localFieldName = "_$cacheFieldName"
       return CodeBlock.builder()
@@ -211,6 +245,8 @@ object JavaCodeGenerator {
           .add("return (\$T) \$N", returnTypeName.j, localFieldName)
           .build()
     }
+
+    // Strategy 3: VOLATILE_FIELDS (default)
     return CodeBlock.builder()
         .beginControlFlow("if (\$N == \$T.NONE)", cacheFieldName, None::class.java)
         .beginControlFlow("synchronized (this)")
@@ -329,4 +365,90 @@ object JavaCodeGenerator {
           )
           .addStatement("throw new \$T()", UnsupportedOperationException::class.java)
           .build()
+
+  // ===== ATOMIC_ARRAY Strategy Methods =====
+
+  private fun CacheArrayField.spec(): FieldSpec {
+      val arrayTypeName = com.squareup.javapoet.ParameterizedTypeName.get(
+          com.squareup.javapoet.ClassName.get("java.util.concurrent.atomic", "AtomicReferenceArray"),
+          com.squareup.javapoet.ClassName.get(Object::class.java)
+      )
+      return FieldSpec.builder(arrayTypeName, name, Modifier.PRIVATE, Modifier.FINAL)
+          .initializer("new AtomicReferenceArray<>(\$L)", size)
+          .build()
+  }
+
+  private fun CacheArrayField.indexConstants(
+      factoryMethods: List<FactoryProviderMethod>
+  ): List<FieldSpec> {
+      return factoryMethods.mapIndexed { index, method ->
+          FieldSpec.builder(
+              com.squareup.javapoet.TypeName.INT,
+              "INDEX_${method.name}",
+              Modifier.PRIVATE,
+              Modifier.STATIC,
+              Modifier.FINAL
+          )
+          .initializer("\$L", index)
+          .build()
+      }
+  }
+
+  private fun CacheArrayField.getOrCreateHelper(): MethodSpec {
+      val typeVarT = com.squareup.javapoet.TypeVariableName.get("T")
+      val supplierType = com.squareup.javapoet.ParameterizedTypeName.get(
+          com.squareup.javapoet.ClassName.get("java.util.function", "Supplier"),
+          typeVarT
+      )
+      return MethodSpec.methodBuilder("getOrCreate")
+          .addAnnotation(
+              AnnotationSpec.builder(SuppressWarnings::class.java)
+                  .addMember("value", "\$S", "unchecked")
+                  .build()
+          )
+          .addModifiers(Modifier.PRIVATE)
+          .addTypeVariable(typeVarT)
+          .addParameter(com.squareup.javapoet.TypeName.INT, "index")
+          .addParameter(supplierType, "factory")
+          .returns(typeVarT)
+          .addCode(CodeBlock.builder()
+              .addStatement("Object value = \$N.get(index)", name)
+              .beginControlFlow("if (value == null)")
+              .addStatement("T newValue = factory.get()")
+              .beginControlFlow("if (newValue == null)")
+              .addStatement(
+                  "throw new \$T(\$S)",
+                  NullPointerException::class.java,
+                  "Factory method cannot return null"
+              )
+              .endControlFlow()
+              .beginControlFlow("if (!\$N.compareAndSet(index, null, newValue))", name)
+              .addStatement("value = \$N.get(index)", name)
+              .nextControlFlow("else")
+              .addStatement("value = newValue")
+              .endControlFlow()
+              .endControlFlow()
+              .addStatement("return (T) value")
+              .build()
+          )
+          .build()
+  }
+
+  private fun FactoryProviderMethod.createMethodSpec(
+      cacheArrayField: CacheArrayField?
+  ): MethodSpec? {
+      // Only generate for ATOMIC_ARRAY strategy
+      if (cacheArrayField == null) return null
+
+      val factoryBody = body
+      if (factoryBody !is FactoryProviderMethodBody.Cached) return null
+
+      val createMethodName = "create${name.replaceFirstChar { it.uppercase() }}"
+
+      return MethodSpec.methodBuilder(createMethodName)
+          .addModifiers(Modifier.PRIVATE)
+          .returns(returnTypeName.j)
+          .addStatement("return \$L", factoryBody.instantiation.spec())
+          .build()
+  }
 }

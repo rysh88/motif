@@ -64,21 +64,30 @@ private constructor(
 
     private val providerMethodNames = mutableMapOf<Type, String>()
     private val cacheFieldNames = mutableMapOf<Type, String>()
+    private val cacheIndices = mutableMapOf<Type, Int>()
 
     fun create(): ScopeImpl {
       val isInternal = (scope.clazz as? CompilerClass)?.isInternal() ?: false
+
+      val scopeAnnotation = scope.clazz.annotations
+          .find { it.className == motif.Scope::class.java.name }!!
+
+      val cachingStrategy = resolveCachingStrategy(scopeAnnotation)
+      val useAtomicArray = cachingStrategy == motif.CachingStrategy.ATOMIC_ARRAY
+
+      // For backward compatibility: map cachingStrategy back to boolean
+      val useNullFieldInitialization = cachingStrategy == motif.CachingStrategy.VOLATILE_FIELDS_NULL_INIT
+
       return ScopeImpl(
-          (scope.clazz.annotations
-              .find { it.className == motif.Scope::class.java.name }!!
-              .annotationValueMap[SCOPE_ANNOTATION_FIELD_USE_NULL]
-              as? Boolean) ?: false,
+          useNullFieldInitialization,
           scope.implClassName,
           scope.typeName,
           isInternal,
           scopeImplAnnotation(),
           objectsField(),
           dependenciesField(),
-          cacheFields(),
+          if (useAtomicArray) cacheArrayField() else null,
+          if (useAtomicArray) emptyList() else cacheFields(),
           constructor(),
           alternateConstructor(),
           accessMethodImpls(),
@@ -367,6 +376,45 @@ private constructor(
 
       return type
     }
+
+    /**
+     * Resolves caching strategy, handling backward compatibility with useNullFieldInitialization.
+     */
+    private fun resolveCachingStrategy(scopeAnnotation: motif.ast.IrAnnotation): motif.CachingStrategy {
+        // Priority 1: Check new cachingStrategy field
+        val strategyValue = scopeAnnotation.annotationValueMap[SCOPE_ANNOTATION_FIELD_CACHING_STRATEGY]
+        if (strategyValue != null) {
+            return when (strategyValue.toString()) {
+                "ATOMIC_ARRAY" -> motif.CachingStrategy.ATOMIC_ARRAY
+                "VOLATILE_FIELDS_NULL_INIT" -> motif.CachingStrategy.VOLATILE_FIELDS_NULL_INIT
+                "VOLATILE_FIELDS" -> motif.CachingStrategy.VOLATILE_FIELDS
+                else -> motif.CachingStrategy.VOLATILE_FIELDS
+            }
+        }
+
+        // Priority 2: Backward compatibility - check legacy useNullFieldInitialization
+        val useNullInit = scopeAnnotation.annotationValueMap[SCOPE_ANNOTATION_FIELD_USE_NULL] as? Boolean
+        return if (useNullInit == true) {
+            motif.CachingStrategy.VOLATILE_FIELDS_NULL_INIT
+        } else {
+            motif.CachingStrategy.VOLATILE_FIELDS
+        }
+    }
+
+    /**
+     * Creates cache array field for ATOMIC_ARRAY strategy.
+     */
+    private fun cacheArrayField(): CacheArrayField? {
+        val cachedMethods = scope.factoryMethods.filter { it.isCached }
+        if (cachedMethods.isEmpty()) return null
+
+        // Assign indices to each cached dependency
+        cachedMethods.forEachIndexed { index, factoryMethod ->
+            cacheIndices[factoryMethod.returnType.type] = index
+        }
+
+        return CacheArrayField(cachedMethods.size)
+    }
   }
 
   private class DependencyMethodData(
@@ -434,6 +482,7 @@ private constructor(
     private const val OBJECTS_FIELD_NAME = "objects"
     private const val DEPENDENCIES_FIELD_NAME = "dependencies"
     private const val SCOPE_ANNOTATION_FIELD_USE_NULL = "useNullFieldInitialization"
+    private const val SCOPE_ANNOTATION_FIELD_CACHING_STRATEGY = "cachingStrategy"
 
     fun create(env: XProcessingEnv, graph: ResolvedGraph): List<ScopeImpl> =
         ScopeImplFactory(env, graph).create()
