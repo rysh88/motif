@@ -19,6 +19,8 @@ import android.app.Activity;
 import android.content.Context;
 import android.view.ViewGroup;
 import androidx.appcompat.app.AppCompatActivity;
+
+import motif.CachingStrategy;
 import motif.Expose;
 import motif.Scope;
 import motif.sample.app.bottom_sheet.BottomSheetScope;
@@ -27,7 +29,7 @@ import motif.sample.lib.controller.ControllerObjects;
 import motif.sample.lib.db.Database;
 import motif.sample.lib.multiselect.MultiSelector;
 
-@Scope(useNullFieldInitialization = true)
+@Scope(cachingStrategy = CachingStrategy.VOLATILE_FIELDS_NULL_INIT)
 public interface RootScope {
 
   RootView view();

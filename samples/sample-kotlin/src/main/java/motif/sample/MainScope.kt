@@ -15,11 +15,12 @@
  */
 package motif.sample
 
+import motif.CachingStrategy
 import javax.inject.Named
 import motif.Creatable
 import motif.Scope
 
-@Scope(useNullFieldInitialization = true)
+@Scope(cachingStrategy = CachingStrategy.ATOMIC_ARRAY)
 interface MainScope : Creatable<MainScope.Dependencies> {
 
   fun greeter(): Greeter

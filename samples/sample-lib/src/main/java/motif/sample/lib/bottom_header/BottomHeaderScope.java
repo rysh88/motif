@@ -15,10 +15,11 @@
  */
 package motif.sample.lib.bottom_header;
 
+import motif.CachingStrategy;
 import motif.Scope;
 import motif.sample.lib.controller.ControllerObjects;
 
-@Scope(useNullFieldInitialization = true)
+@Scope(cachingStrategy = CachingStrategy.VOLATILE_FIELDS_NULL_INIT)
 public interface BottomHeaderScope {
 
   BottomHeaderView view();
