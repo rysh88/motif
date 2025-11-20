@@ -213,8 +213,7 @@ object JavaCodeGenerator {
     // Strategy 1: ATOMIC_ARRAY
     if (cacheArrayField != null) {
         return CodeBlock.of(
-            "return \$N.getOrCreate(INDEX_\$N, this::create\$L)",
-            cacheArrayField.name,
+            "return getOrCreate(INDEX_\$N, this::create\$L)",
             providerMethodName,
             providerMethodName.replaceFirstChar { it.uppercase() }
         )

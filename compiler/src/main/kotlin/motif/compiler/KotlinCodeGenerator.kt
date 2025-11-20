@@ -24,6 +24,7 @@ import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.KModifier
 import com.squareup.kotlinpoet.ParameterSpec
 import com.squareup.kotlinpoet.ParameterizedTypeName
+import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.PropertySpec
 import com.squareup.kotlinpoet.TypeName
 import com.squareup.kotlinpoet.TypeSpec
@@ -49,7 +50,17 @@ object KotlinCodeGenerator {
             addSuperinterface(superClassName.kt)
             objectsField?.let { addProperty(it.spec()) }
             addProperty(dependenciesField.spec())
+
+            // ATOMIC_ARRAY strategy: Add cache array field + index constants + helper method
+            cacheArrayField?.let { arrayField ->
+              addProperty(arrayField.spec())
+              addProperties(arrayField.indexConstants(factoryProviderMethods))
+              addFunction(arrayField.getOrCreateHelper())
+            }
+
+            // VOLATILE_FIELDS strategy: Add individual cache fields
             cacheFields.forEach { addProperty(it.spec(useNullFieldInitialization)) }
+
             primaryConstructor(constructor.spec())
             alternateConstructor?.let { addFunction(it.spec()) }
             accessMethodImpls
@@ -60,7 +71,7 @@ object KotlinCodeGenerator {
                 .forEach { addProperty(it.propSpec()) }
             childMethodImpls.forEach { addFunction(it.spec()) }
             addFunction(scopeProviderMethod.spec())
-            factoryProviderMethods.forEach { addFunctions(it.specs(useNullFieldInitialization)) }
+            factoryProviderMethods.forEach { addFunctions(it.specs(useNullFieldInitialization, cacheArrayField)) }
             dependencyProviderMethods.forEach { addFunction(it.spec()) }
             dependencies?.let { addType(it.spec()) }
             objectsImpl?.let { addType(it.spec()) }
@@ -111,6 +122,51 @@ object KotlinCodeGenerator {
             .initializer("%T.NONE", None::class)
             .build()
       }
+
+  private fun CacheArrayField.spec(): PropertySpec {
+    val atomicArrayClass = ClassName.bestGuess("java.util.concurrent.atomic.AtomicReferenceArray")
+    val arrayTypeName = atomicArrayClass.parameterizedBy(Any::class.asTypeName())
+    return PropertySpec.builder(name, arrayTypeName, KModifier.PRIVATE, KModifier.FINAL)
+        .initializer("AtomicReferenceArray(%L)", size)
+        .build()
+  }
+
+  private fun CacheArrayField.indexConstants(
+      factoryMethods: List<FactoryProviderMethod>
+  ): List<PropertySpec> {
+    return factoryMethods.mapIndexed { index, method ->
+      PropertySpec.builder("INDEX_${method.name}", Int::class, KModifier.PRIVATE)
+          .initializer("%L", index)
+          .build()
+    }
+  }
+
+  private fun CacheArrayField.getOrCreateHelper(): FunSpec {
+    val typeVarT = com.squareup.kotlinpoet.TypeVariableName("T")
+    val supplierClass = ClassName.bestGuess("java.util.function.Supplier")
+    val supplierType = supplierClass.parameterizedBy(typeVarT)
+    return FunSpec.builder("getOrCreate")
+        .addModifiers(KModifier.PRIVATE)
+        .addTypeVariable(typeVarT)
+        .addParameter("index", Int::class)
+        .addParameter("factory", supplierType)
+        .returns(typeVarT)
+        .addAnnotation(AnnotationSpec.builder(Suppress::class).addMember("\"UNCHECKED_CAST\"").build())
+        .addCode("""
+          var value = cache.get(index)
+          if (value == null) {
+            val newValue = factory.get()
+              ?: throw NullPointerException("Factory method cannot return null")
+            if (!cache.compareAndSet(index, null, newValue)) {
+              value = cache.get(index)
+            } else {
+              value = newValue
+            }
+          }
+          return value as T
+        """.trimIndent())
+        .build()
+  }
 
   private fun Constructor.spec(): FunSpec =
       FunSpec.constructorBuilder()
@@ -203,26 +259,45 @@ object KotlinCodeGenerator {
           .addStatement("return this")
           .build()
 
-  private fun FactoryProviderMethod.specs(useNullFieldInitialization: Boolean): List<FunSpec> {
+  private fun FactoryProviderMethod.specs(
+      useNullFieldInitialization: Boolean,
+      cacheArrayField: CacheArrayField?
+  ): List<FunSpec> {
     val primarySpec =
         FunSpec.builder(name)
             .addModifiers(KModifier.INTERNAL)
             .returns(returnTypeName.reloadedForTypeArgs(env))
-            .addCode(body.spec(useNullFieldInitialization))
+            .addCode(body.spec(useNullFieldInitialization, cacheArrayField, name))
             .build()
     val spreadSpecs = spreadProviderMethods.map { it.spec() }
     return listOf(primarySpec) + spreadSpecs
   }
 
-  private fun FactoryProviderMethodBody.spec(useNullFieldInitialization: Boolean): CodeBlock =
+  private fun FactoryProviderMethodBody.spec(
+      useNullFieldInitialization: Boolean,
+      cacheArrayField: CacheArrayField?,
+      providerMethodName: String
+  ): CodeBlock =
       when (this) {
-        is FactoryProviderMethodBody.Cached -> spec(useNullFieldInitialization)
+        is FactoryProviderMethodBody.Cached -> spec(useNullFieldInitialization, cacheArrayField, providerMethodName)
         is FactoryProviderMethodBody.Uncached -> spec()
       }
 
   private fun FactoryProviderMethodBody.Cached.spec(
       useNullFieldInitialization: Boolean,
+      cacheArrayField: CacheArrayField?,
+      providerMethodName: String
   ): CodeBlock {
+    // Strategy 1: ATOMIC_ARRAY
+    if (cacheArrayField != null) {
+      return CodeBlock.of(
+          "return getOrCreate(INDEX_%N) { %L }",
+          providerMethodName,
+          instantiation.spec()
+      )
+    }
+
+    // Strategy 2: VOLATILE_FIELDS_NULL_INIT or VOLATILE_FIELDS
     if (useNullFieldInitialization) {
       val localFieldName = "_$cacheFieldName"
       val codeBlockBuilder =

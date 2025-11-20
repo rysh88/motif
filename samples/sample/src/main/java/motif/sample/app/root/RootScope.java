@@ -29,7 +29,7 @@ import motif.sample.lib.controller.ControllerObjects;
 import motif.sample.lib.db.Database;
 import motif.sample.lib.multiselect.MultiSelector;
 
-@Scope(cachingStrategy = CachingStrategy.VOLATILE_FIELDS_NULL_INIT)
+@Scope(cachingStrategy = CachingStrategy.ATOMIC_ARRAY)
 public interface RootScope {
 
   RootView view();
