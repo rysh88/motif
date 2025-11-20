@@ -22,13 +22,4 @@ public @interface Scope {
    * @return the caching strategy to use (default: VOLATILE_FIELDS)
    */
   CachingStrategy cachingStrategy() default CachingStrategy.VOLATILE_FIELDS;
-
-  /**
-   * @deprecated Use cachingStrategy = CachingStrategy.VOLATILE_FIELDS_NULL_INIT instead.
-   *
-   * @return on false, the field will be initialized with [None.NONE]. Otherwise, null &
-   *     [Initialized.INITIALIZED] will be used to skip the field initialization.
-   */
-  @Deprecated
-  boolean useNullFieldInitialization() default false;
 }

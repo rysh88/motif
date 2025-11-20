@@ -44,7 +44,6 @@ public enum CachingStrategy {
      *   <li>Fast reads (~2ns per access)</li>
      *   <li>Slightly safer null handling than VOLATILE_FIELDS</li>
      *   <li>Lock contention during initialization can cause ANR with &gt;20 dependencies</li>
-     *   <li>Equivalent to useNullFieldInitialization = true (legacy)</li>
      * </ul>
      *
      * <p>Best for: Small scopes requiring strict null safety

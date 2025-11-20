@@ -378,26 +378,17 @@ private constructor(
     }
 
     /**
-     * Resolves caching strategy, handling backward compatibility with useNullFieldInitialization.
+     * Resolves caching strategy from @Scope annotation.
      */
     private fun resolveCachingStrategy(scopeAnnotation: motif.ast.IrAnnotation): motif.CachingStrategy {
-        // Priority 1: Check new cachingStrategy field
         val strategyValue = scopeAnnotation.annotationValueMap[SCOPE_ANNOTATION_FIELD_CACHING_STRATEGY]
-        if (strategyValue != null) {
-            return when (strategyValue.toString()) {
-                "ATOMIC_ARRAY" -> motif.CachingStrategy.ATOMIC_ARRAY
-                "VOLATILE_FIELDS_NULL_INIT" -> motif.CachingStrategy.VOLATILE_FIELDS_NULL_INIT
-                "VOLATILE_FIELDS" -> motif.CachingStrategy.VOLATILE_FIELDS
-                else -> motif.CachingStrategy.VOLATILE_FIELDS
-            }
-        }
+            ?: return motif.CachingStrategy.VOLATILE_FIELDS
 
-        // Priority 2: Backward compatibility - check legacy useNullFieldInitialization
-        val useNullInit = scopeAnnotation.annotationValueMap[SCOPE_ANNOTATION_FIELD_USE_NULL] as? Boolean
-        return if (useNullInit == true) {
-            motif.CachingStrategy.VOLATILE_FIELDS_NULL_INIT
-        } else {
-            motif.CachingStrategy.VOLATILE_FIELDS
+        return when (strategyValue.toString()) {
+            "ATOMIC_ARRAY" -> motif.CachingStrategy.ATOMIC_ARRAY
+            "VOLATILE_FIELDS_NULL_INIT" -> motif.CachingStrategy.VOLATILE_FIELDS_NULL_INIT
+            "VOLATILE_FIELDS" -> motif.CachingStrategy.VOLATILE_FIELDS
+            else -> motif.CachingStrategy.VOLATILE_FIELDS
         }
     }
 
@@ -481,7 +472,6 @@ private constructor(
 
     private const val OBJECTS_FIELD_NAME = "objects"
     private const val DEPENDENCIES_FIELD_NAME = "dependencies"
-    private const val SCOPE_ANNOTATION_FIELD_USE_NULL = "useNullFieldInitialization"
     private const val SCOPE_ANNOTATION_FIELD_CACHING_STRATEGY = "cachingStrategy"
 
     fun create(env: XProcessingEnv, graph: ResolvedGraph): List<ScopeImpl> =
