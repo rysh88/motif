@@ -25,13 +25,25 @@ class NameScope(blacklist: Iterable<String> = emptySet()) {
 
   private val names = UniqueNameSet(blacklist)
 
-  fun name(type: Type): String =
-      names.unique(
-          Names.safeName(
-              (type.type as CompilerType).mirror,
-              (type.qualifier as? CompilerAnnotation)?.mirror,
-          ),
-      )
+  fun name(type: Type): String {
+    val baseName = Names.safeName(
+        (type.type as CompilerType).mirror,
+        (type.qualifier as? CompilerAnnotation)?.mirror,
+    )
+
+    // Shorten excessively long names to avoid KotlinPoet line-wrapping issues
+    // Names longer than 80 characters can cause invalid syntax when KotlinPoet wraps lines
+    val shortenedName = if (baseName.length > 80) {
+      // Keep last 60 chars (has distinctive type info) + hash prefix (uniqueness)
+      // Prefix hash with 'h' to ensure valid identifier (can't start with number)
+      val hash = baseName.hashCode().toString().replace("-", "N")
+      "h" + hash + "_" + baseName.takeLast(60)
+    } else {
+      baseName
+    }
+
+    return names.unique(shortenedName)
+  }
 }
 
 private class UniqueNameSet(blacklist: Iterable<String>) {

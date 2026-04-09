@@ -42,7 +42,7 @@ ext.deps = [
                 targetSdkVersion: 30,
 
                 gradlePlugins: [
-                        android: 'com.android.tools.build:gradle:7.4.2',
+                        android: 'com.android.tools.build:gradle:8.7.2',
                         intellij: 'org.jetbrains.intellij:org.jetbrains.intellij.gradle.plugin:1.17.4',
                         kotlin: "org.jetbrains.kotlin:kotlin-gradle-plugin:${versions.kotlin}",
                         ksp: "com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin:${versions.ksp}",

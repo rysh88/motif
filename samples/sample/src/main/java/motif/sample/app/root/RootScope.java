@@ -19,6 +19,9 @@ import android.app.Activity;
 import android.content.Context;
 import android.view.ViewGroup;
 import androidx.appcompat.app.AppCompatActivity;
+
+import motif.CachingStrategy;
+import motif.DoNotCache;
 import motif.Expose;
 import motif.Scope;
 import motif.sample.app.bottom_sheet.BottomSheetScope;
@@ -27,7 +30,7 @@ import motif.sample.lib.controller.ControllerObjects;
 import motif.sample.lib.db.Database;
 import motif.sample.lib.multiselect.MultiSelector;
 
-@Scope(useNullFieldInitialization = true)
+@Scope(cachingStrategy = CachingStrategy.RUNTIME_SELECTABLE)
 public interface RootScope {
 
   RootView view();
@@ -35,6 +38,12 @@ public interface RootScope {
   PhotoGridScope photoList(ViewGroup parent);
 
   BottomSheetScope bottomSheet(ViewGroup parent);
+  BottomSheetScope bottomSheetV2(ViewGroup parent);
+
+  ChildScope bottomSheet(Integer randomNumber);
+  ChildScope bottomSheet();
+
+  Integer randomNumber();
 
   @motif.Objects
   abstract class Objects extends ControllerObjects<RootController, RootView> {
@@ -49,6 +58,12 @@ public interface RootScope {
     abstract Activity activity(AppCompatActivity activity);
 
     @Expose
+    @DoNotCache(onlyForSmartCacheMode = true)
     abstract MultiSelector multiSelector();
+
+    @Expose
+    Integer randomNumber() {
+      return 100;
+    }
   }
 }

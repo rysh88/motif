@@ -18,6 +18,9 @@ package motif.sample.app.root;
 import android.os.Bundle;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+
+import motif.CachingStrategy;
+import motif.MotifRuntimeConfig;
 import motif.ScopeFactory;
 
 public class RootActivity extends AppCompatActivity {
@@ -25,6 +28,7 @@ public class RootActivity extends AppCompatActivity {
   @Override
   protected void onCreate(@Nullable Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
+    MotifRuntimeConfig.cachingStrategy = CachingStrategy.SMART_CACHE;
     RootFactory rootFactory = ScopeFactory.create(RootFactory.class);
     RootScope rootScope = rootFactory.create(this);
     setContentView(rootScope.view());

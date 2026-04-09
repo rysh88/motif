@@ -18,17 +18,29 @@ package motif.sample
 import android.app.Activity
 import android.os.Bundle
 import android.widget.TextView
+import motif.CachingStrategy
+import motif.MotifRuntimeConfig
 import motif.ScopeFactory
 
 class MainActivity : Activity() {
 
-  private val mainScope: MainScope =
-      ScopeFactory.create(MainScope::class.java, object : MainScope.Dependencies {})
+  companion object {
+    init {
+      MotifRuntimeConfig.cachingStrategy = CachingStrategy.SMART_CACHE
+    }
+  }
+
+//  private val mainScope: MainScope by lazy {
+//      ScopeFactory.create(MainScope::class.java, object : MainScope.Dependencies {})
+//    }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
 
+    MotifRuntimeConfig.cachingStrategy = CachingStrategy.SMART_CACHE
+
+    val mainScope: MainScope = ScopeFactory.create(MainScope::class.java, object : MainScope.Dependencies {})
     val greeter = mainScope.greeter()
 
     findViewById<TextView>(R.id.text).text = greeter.greet()

@@ -15,7 +15,9 @@
  */
 package motif.sample
 
-class Greeter(private val name: String) {
+import motif.DoNotCache
+
+class Greeter(private val name: String) : BaseGreeter(){
 
   fun greet(): String = "Hello $name!"
 }

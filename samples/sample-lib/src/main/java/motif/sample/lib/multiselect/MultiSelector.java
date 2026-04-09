@@ -20,6 +20,7 @@ import io.reactivex.Observable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import motif.DoNotCache;
 import motif.sample.lib.db.Photo;
 
 public class MultiSelector {

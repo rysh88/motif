@@ -35,13 +35,14 @@ import motif.ast.compiler.CompilerMethod
  * implementations.
  */
 class ScopeImpl(
-    val useNullFieldInitialization: Boolean,
+    val useSynchronized: Boolean,
     val className: ClassName,
     val superClassName: ClassName,
     val internalScope: Boolean,
     val scopeImplAnnotation: ScopeImplAnnotation,
     val objectsField: ObjectsField?,
     val dependenciesField: DependenciesField,
+    val perDependencyLockFields: PerDependencyLockFields?,
     val cacheFields: List<CacheField>,
     val constructor: Constructor,
     val alternateConstructor: AlternateConstructor?,
@@ -52,6 +53,8 @@ class ScopeImpl(
     val dependencyProviderMethods: List<DependencyProviderMethod>,
     val objectsImpl: ObjectsImpl?,
     val dependencies: Dependencies?,
+    val staticDependencyClasses: List<StaticDependencyClass> = emptyList(),
+    val isDynamicWrapper: Boolean = false,
 )
 
 /**
@@ -93,6 +96,18 @@ class DependenciesField(val dependenciesClassName: ClassName, val name: String)
  * ```
  */
 class CacheField(val name: String)
+
+/**
+ * ```
+ * private final Object lock_foo = new Object();
+ * private final Object lock_bar = new Object();
+ * ```
+ * Per-dependency lock fields for SMART_CACHE strategy with lock-per-dependency enabled.
+ * Only created when MotifRuntimeConfig.enableLockPerDependency is true.
+ */
+class PerDependencyLockFields(
+    val locks: Map<String, String> // Maps cache field name to lock field name (e.g., "foo" -> "lock_foo")
+)
 
 /**
  * ```
@@ -156,10 +171,13 @@ class ChildMethodImplParameter(val typeName: TypeName, val name: String)
 
 /**
  * ```
+ * Anonymous class:
  * new ChildScopeImpl.Dependencies() {
- *
  *     [ ChildDependencyMethodImpls ]
  * }
+ *
+ * Static class:
+ * new PhotoGridScopeDependencies(this, parent)
  * ```
  */
 class ChildDependenciesImpl(
@@ -167,6 +185,9 @@ class ChildDependenciesImpl(
     val methods: List<ChildDependencyMethodImpl>,
     val isAbstractClass: Boolean,
     val env: XProcessingEnv,
+    val useStaticClass: Boolean = false,
+    val staticClassName: String? = null,
+    val parentScopeClassName: ClassName? = null,
 )
 
 /**
@@ -257,7 +278,7 @@ sealed class FactoryProviderMethodBody {
    * return (Integer) integer;
    * ```
    */
-  class Cached(
+  class Cached constructor(
       val cacheFieldName: String,
       val returnTypeName: TypeName,
       val instantiation: FactoryProviderInstantiation,
@@ -499,3 +520,33 @@ private constructor(
         ClassName(j as com.squareup.javapoet.ClassName, env)
   }
 }
+
+/**
+ * Static inner class for child scope dependencies.
+ * ```
+ * private static class PhotoGridScopeDependencies implements PhotoGridScopeImpl.Dependencies {
+ *   private final RootScopeImpl parent;
+ *   private final ViewGroup viewGroup;
+ *
+ *   PhotoGridScopeDependencies(RootScopeImpl parent, ViewGroup viewGroup) {
+ *     this.parent = parent;
+ *     this.viewGroup = viewGroup;
+ *   }
+ *
+ *   @Override
+ *   public ViewGroup viewGroup() { return viewGroup; }
+ *
+ *   @Override
+ *   public Database database() { return parent.database(); }
+ * }
+ * ```
+ */
+class StaticDependencyClass(
+    val className: String,
+    val childDependenciesClassName: ClassName,
+    val parentScopeClassName: ClassName,
+    val isAbstractClass: Boolean,
+    val methods: List<ChildDependencyMethodImpl>,
+    val methodParameters: List<ChildMethodImplParameter>,
+    val env: XProcessingEnv,
+)

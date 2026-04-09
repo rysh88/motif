@@ -17,6 +17,7 @@ package motif.sample.app.photo_grid;
 
 import android.view.ViewGroup;
 import motif.sample.R;
+import motif.sample.app.bottom_sheet.BottomSheetListener;
 import motif.sample.lib.controller.Controller;
 import motif.sample.lib.db.Database;
 

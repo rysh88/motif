@@ -31,7 +31,7 @@ import javax.inject.Inject;
 import motif.sample.app.photo_list.PhotoListView;
 import motif.sample.lib.bottom_header.BottomHeaderView;
 
-public class BottomSheetView extends LinearLayout {
+public class BottomSheetView extends LinearLayout implements BottomSheetListener {
 
   private BottomSheetBehavior<BottomSheetView> behavior;
 

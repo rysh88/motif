@@ -3,6 +3,7 @@ plugins {
 }
 
 android {
+    namespace 'motif.sample'
     compileSdkVersion deps.build.compileSdkVersion
     buildToolsVersion deps.build.buildToolsVersion
 
@@ -16,13 +17,8 @@ android {
         targetCompatibility JavaVersion.VERSION_11
     }
 
-    defaultConfig {
-        minSdkVersion deps.build.minSdkVersion
-        targetSdkVersion deps.build.targetSdkVersion
-    }
-
     // No need for lint. This is just a tutorial.
-    lintOptions {
+    lint {
         abortOnError false
         quiet true
     }
@@ -35,7 +31,6 @@ android {
 }
 
 dependencies {
-    annotationProcessor deps.butterknifeCompiler
     annotationProcessor deps.glideCompiler
     annotationProcessor project(':compiler')
     implementation project(':samples-sample-lib')
@@ -43,7 +38,6 @@ dependencies {
     implementation deps.glide
     implementation deps.stetho
     implementation deps.support.design
-    implementation deps.butterknife
 
     testImplementation deps.test.junit
     testImplementation deps.test.truth

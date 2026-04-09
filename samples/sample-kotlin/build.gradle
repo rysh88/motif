@@ -9,6 +9,7 @@ kotlin {
 }
 
 android {
+    namespace 'motif.sample'
     compileSdkVersion deps.build.compileSdkVersion
     buildToolsVersion deps.build.buildToolsVersion
 
@@ -23,7 +24,7 @@ android {
     }
 
     // No need for lint. This is just a tutorial.
-    lintOptions {
+    lint {
         abortOnError false
         quiet true
     }

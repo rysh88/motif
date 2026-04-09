@@ -9,6 +9,7 @@ kotlin {
 }
 
 android {
+    namespace 'motif.sample.lib.ksp'
     namespace 'com.example.sample_lib_ksp'
     compileSdkVersion deps.build.compileSdkVersion
 
@@ -18,7 +19,7 @@ android {
     }
 
     // No need for lint. This is just a tutorial.
-    lintOptions {
+    lint {
         abortOnError false
         quiet true
     }

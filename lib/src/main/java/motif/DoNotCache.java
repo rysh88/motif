@@ -15,4 +15,33 @@
  */
 package motif;
 
-public @interface DoNotCache {}
+/**
+ * Annotation to indicate that a dependency should not be cached.
+ *
+ * <p>By default, this annotation applies to all caching strategies. However, you can
+ * configure it to only apply to SMART_CACHE mode by setting {@link #onlyForSmartCacheMode()}
+ * to true.
+ *
+ * <p>Example usage:
+ * <pre>{@code
+ * @motif.Scope
+ * interface MyScope {
+ *   @DoNotCache  // Applies to all modes
+ *   MyDependency dependency();
+ *
+ *   @DoNotCache(onlyForSmartCacheMode = true)  // Only applies to SMART_CACHE
+ *   MyOtherDependency otherDependency();
+ * }
+ * }</pre>
+ */
+public @interface DoNotCache {
+    /**
+     * If true, this annotation only applies to SMART_CACHE mode. Dependencies will still
+     * be cached when using VOLATILE_FIELDS mode.
+     *
+     * <p>If false (default), the dependency is not cached in any mode.
+     *
+     * @return true if DoNotCache should only apply to SMART_CACHE mode, false otherwise
+     */
+    boolean onlyForSmartCacheMode() default false;
+}

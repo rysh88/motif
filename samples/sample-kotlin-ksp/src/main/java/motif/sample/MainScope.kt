@@ -15,22 +15,21 @@
  */
 package motif.sample
 
+import android.view.ViewGroup
 import javax.inject.Named
 import motif.Creatable
 import motif.Scope
+import org.checkerframework.checker.guieffect.qual.UIEffect
 
 @Scope
 interface MainScope : Creatable<MainScope.Dependencies> {
 
-  fun greeter(): Greeter
+  fun childBuilder(): ChildBuilder
 
   @motif.Objects
-  open class Objects {
+  abstract class Objects
 
-    @Named("name") fun name() = "World"
-
-    fun greeter(@Named("name") name: String) = Greeter(name)
+  interface Dependencies {
+//    fun viewGroup(): ViewGroup
   }
-
-  interface Dependencies
 }
