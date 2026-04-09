@@ -16,10 +16,10 @@
         android:layout_marginBottom="40dp" />
 
     <Button
-        android:id="@+id/button_volatile_fields"
+        android:id="@+id/button_baseline"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Test VOLATILE_FIELDS Strategy"
+        android:text="Test BASELINE Strategy"
         android:layout_marginBottom="16dp" />
 
     <Button

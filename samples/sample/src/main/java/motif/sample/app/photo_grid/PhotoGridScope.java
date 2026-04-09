@@ -22,7 +22,7 @@ import motif.sample.app.photo_grid_item.PhotoGridItemView;
 import motif.sample.lib.controller.ControllerObjects;
 import motif.sample.lib.db.Photo;
 
-@Scope(cachingStrategy = CachingStrategy.VOLATILE_FIELDS)
+@Scope(cachingStrategy = CachingStrategy.BASELINE)
 public interface PhotoGridScope {
 
   PhotoGridView view();

@@ -13,11 +13,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package motif.sample.example2;
+package testcases.T079_runtime_selectable_strategy;
 
-import motif.Scope;
+import motif.CachingStrategy;
+import motif.Creatable;
 
-@Scope
-public interface ExampleChildScope {
-    Listener listener();
+@motif.Scope(cachingStrategy = CachingStrategy.RUNTIME_SELECTABLE)
+public interface Scope extends Creatable<Scope.Dependencies> {
+
+    String cachedDependency();
+
+    @motif.Objects
+    class Objects {
+
+        String cachedDependency() {
+            return "value_" + Counter.counter++;
+        }
+    }
+
+    interface Dependencies {}
+}
+
+class Counter {
+    static int counter = 0;
 }

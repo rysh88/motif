@@ -13,11 +13,33 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package motif.sample.example2;
+package testcases.T077_baseline_caching;
 
-import motif.Scope;
+import motif.CachingStrategy;
+import motif.Creatable;
 
-@Scope
-public interface ExampleChildScope {
-    Listener listener();
+@motif.Scope(cachingStrategy = CachingStrategy.BASELINE)
+public interface Scope extends Creatable<Scope.Dependencies> {
+
+    String cachedString();
+    Integer cachedInteger();
+
+    @motif.Objects
+    class Objects {
+
+        String cachedString() {
+            return "cached_" + Counter.stringCounter++;
+        }
+
+        Integer cachedInteger() {
+            return Counter.intCounter++;
+        }
+    }
+
+    interface Dependencies {}
+}
+
+class Counter {
+    static int stringCounter = 0;
+    static int intCounter = 0;
 }

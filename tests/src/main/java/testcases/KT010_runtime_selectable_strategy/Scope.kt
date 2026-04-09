@@ -13,11 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package motif.sample.example2;
+package testcases.KT010_runtime_selectable_strategy
 
-import motif.Scope;
+import motif.CachingStrategy
+import motif.Scope
 
-@Scope
-public interface ExampleChildScope {
-    Listener listener();
+@Scope(cachingStrategy = CachingStrategy.RUNTIME_SELECTABLE)
+interface Scope {
+
+    fun cachedDependency(): String
+
+    @motif.Objects
+    open class Objects {
+
+        fun cachedDependency(): String {
+            return "value_${Counter.counter++}"
+        }
+    }
+}
+
+object Counter {
+    var counter = 0
 }

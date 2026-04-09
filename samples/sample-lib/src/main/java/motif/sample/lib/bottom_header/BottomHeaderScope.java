@@ -19,7 +19,7 @@ import motif.CachingStrategy;
 import motif.Scope;
 import motif.sample.lib.controller.ControllerObjects;
 
-@Scope(cachingStrategy = CachingStrategy.VOLATILE_FIELDS)
+@Scope(cachingStrategy = CachingStrategy.BASELINE)
 public interface BottomHeaderScope {
 
   BottomHeaderView view();

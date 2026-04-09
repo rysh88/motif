@@ -37,7 +37,7 @@ package motif;
 public @interface DoNotCache {
     /**
      * If true, this annotation only applies to SMART_CACHE mode. Dependencies will still
-     * be cached when using VOLATILE_FIELDS mode.
+     * be cached when using BASELINE mode.
      *
      * <p>If false (default), the dependency is not cached in any mode.
      *

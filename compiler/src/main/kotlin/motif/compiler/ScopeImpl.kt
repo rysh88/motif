@@ -34,8 +34,8 @@ import motif.ast.compiler.CompilerMethod
  * annotation processor. This allows us to share the [ScopeImplFactory] logic across Java and Kotlin
  * implementations.
  */
-class ScopeImpl(
-    val useSynchronized: Boolean,
+class ScopeImpl constructor(
+    val isBaselineStrategy: Boolean,
     val className: ClassName,
     val superClassName: ClassName,
     val internalScope: Boolean,
@@ -54,7 +54,12 @@ class ScopeImpl(
     val objectsImpl: ObjectsImpl?,
     val dependencies: Dependencies?,
     val staticDependencyClasses: List<StaticDependencyClass> = emptyList(),
-    val isDynamicWrapper: Boolean = false,
+    /**
+     * True if this is a runtime-selectable wrapper for RUNTIME_SELECTABLE strategy.
+     * Runtime-selectable wrappers delegate all calls to either _SmartCache or _Baseline variant
+     * based on MotifRuntimeConfig.cachingStrategy (selected at construction time).
+     */
+    val isRuntimeSelectableWrapper: Boolean = false,
 )
 
 /**
@@ -99,11 +104,11 @@ class CacheField(val name: String)
 
 /**
  * ```
- * private final Object lock_foo = new Object();
- * private final Object lock_bar = new Object();
+ * private final MotifLock lock_foo;
+ * private final MotifLock lock_bar;
  * ```
  * Per-dependency lock fields for SMART_CACHE strategy with lock-per-dependency enabled.
- * Only created when MotifRuntimeConfig.enableLockPerDependency is true.
+ * Only created when MotifRuntimeConfig.usePerDependencyLock is true.
  */
 class PerDependencyLockFields(
     val locks: Map<String, String> // Maps cache field name to lock field name (e.g., "foo" -> "lock_foo")

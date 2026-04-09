@@ -43,8 +43,8 @@ object KotlinCodeGenerator {
   }
 
   private fun ScopeImpl.spec(): TypeSpec {
-      // Special handling for dynamic wrapper
-      if (isDynamicWrapper) {
+      // Special handling for runtime-selectable wrapper
+      if (isRuntimeSelectableWrapper) {
         return dynamicWrapperSpec()
       }
 
@@ -57,8 +57,18 @@ object KotlinCodeGenerator {
             objectsField?.let { addProperty(it.spec()) }
             addProperty(dependenciesField.spec())
 
-            // Add individual cache fields (volatile for VOLATILE_FIELDS, plain for SMART_CACHE)
-            cacheFields.forEach { addProperty(it.spec(useSynchronized)) }
+            // Add cache fields (both strategies use volatile for memory visibility)
+            cacheFields.forEach { addProperty(it.spec(isBaselineStrategy)) }
+
+            // Cache config value to ensure consistent lock initialization across all lock fields
+            if (perDependencyLockFields != null && perDependencyLockFields.locks.isNotEmpty()) {
+                addProperty(
+                    PropertySpec.builder("usePerDependencyLocking", Boolean::class)
+                        .addModifiers(KModifier.PRIVATE)
+                        .initializer("%T.usePerDependencyLock", ClassName.bestGuess("motif.MotifRuntimeConfig"))
+                        .build()
+                )
+            }
 
             // Add per-dependency lock fields (nullable, initialized conditionally)
             perDependencyLockFields?.let { lockFields ->
@@ -67,8 +77,7 @@ object KotlinCodeGenerator {
                         PropertySpec.builder(lockFieldName, ClassName.bestGuess("motif.MotifLock").copy(nullable = true))
                             .addModifiers(KModifier.PRIVATE)
                             .mutable(false)
-                            .initializer("if (%T.usePerDependencyLock) %T() else null",
-                                ClassName.bestGuess("motif.MotifRuntimeConfig"),
+                            .initializer("if (usePerDependencyLocking) %T() else null",
                                 ClassName.bestGuess("motif.MotifLock"))
                             .build()
                     )
@@ -87,7 +96,7 @@ object KotlinCodeGenerator {
                 .forEach { addProperty(it.propSpec()) }
             childMethodImpls.forEach { addFunction(it.spec()) }
             addFunction(scopeProviderMethod.spec())
-            factoryProviderMethods.forEach { addFunctions(it.specs(useSynchronized, perDependencyLockFields)) }
+            factoryProviderMethods.forEach { addFunctions(it.specs(isBaselineStrategy, perDependencyLockFields)) }
             dependencyProviderMethods.forEach { addFunction(it.spec()) }
             dependencies?.let { addType(it.spec()) }
             objectsImpl?.let { addType(it.spec()) }
@@ -96,6 +105,10 @@ object KotlinCodeGenerator {
           .build()
   }
 
+  /**
+   * Generates a dynamic wrapper class for RUNTIME_SELECTABLE that delegates to either
+   * _SmartCache or _Baseline implementation based on MotifRuntimeConfig.
+   */
   private fun ScopeImpl.dynamicWrapperSpec(): TypeSpec =
       TypeSpec.classBuilder(className.kt)
           .apply {
@@ -104,26 +117,44 @@ object KotlinCodeGenerator {
             addModifiers(if (internalScope) KModifier.INTERNAL else KModifier.PUBLIC)
             addSuperinterface(superClassName.kt)
 
-            // Add a property for the delegate scope implementation
-            addProperty(
-                PropertySpec.builder("scopeDelegate", superClassName.kt, KModifier.PRIVATE)
-                    .initializer(
-                        CodeBlock.builder()
-                            .beginControlFlow("when (%T.cachingStrategy)", com.squareup.kotlinpoet.ClassName("motif", "MotifRuntimeConfig"))
-                            .addStatement("%T.SMART_CACHE -> %T(dependencies)", com.squareup.kotlinpoet.ClassName("motif", "CachingStrategy"), getVariantClassName("_SmartCache"))
-                            .addStatement("else -> %T(dependencies)", getVariantClassName("_VolatileFields"))
-                            .endControlFlow()
+            // Add constructor parameter as a private property so it's accessible in init block
+            primaryConstructor(
+                FunSpec.constructorBuilder()
+                    .addParameter(
+                        ParameterSpec.builder("dependencies", dependenciesField.dependenciesClassName.kt)
                             .build()
                     )
                     .build()
             )
 
-            // Add constructor that selects implementation based on MotifConfig
-            primaryConstructor(
-                FunSpec.constructorBuilder()
-                    .addParameter("dependencies", dependenciesField.dependenciesClassName.kt)
+            // Add a property for the delegate scope implementation
+            addProperty(
+                PropertySpec.builder("scopeDelegate", superClassName.kt, KModifier.PRIVATE)
+                    .mutable(true)
                     .build()
             )
+
+            // Initialize scopeDelegate in init block where dependencies is accessible
+            addInitializerBlock(
+                CodeBlock.builder()
+                    .add("// Delegate to either _SmartCache or _Baseline variant based on MotifRuntimeConfig.cachingStrategy\n")
+                    .addStatement("scopeDelegate = when (%T.cachingStrategy) {", com.squareup.kotlinpoet.ClassName("motif", "MotifRuntimeConfig"))
+                    .indent()
+                    .addStatement("%T.SMART_CACHE -> %T(dependencies)", com.squareup.kotlinpoet.ClassName("motif", "CachingStrategy"), getVariantClassName("_SmartCache"))
+                    .addStatement("else -> %T(dependencies)", getVariantClassName("_Baseline"))
+                    .unindent()
+                    .addStatement("}")
+                    .build()
+            )
+
+            // Add no-arg constructor if Dependencies has no methods
+            alternateConstructor?.let {
+                addFunction(
+                    FunSpec.constructorBuilder()
+                        .callThisConstructor(CodeBlock.of("object : %T {}", it.dependenciesClassName.kt))
+                        .build()
+                )
+            }
 
             // Delegate all accessor methods to the delegate
             accessMethodImpls
@@ -185,10 +216,10 @@ object KotlinCodeGenerator {
           .initializer(name)
           .build()
 
-  private fun CacheField.spec(useSynchronized: Boolean): PropertySpec {
-      // Both SMART_CACHE and VOLATILE_FIELDS use volatile for proper memory visibility
-      val builder = if (useSynchronized) {
-        // VOLATILE_FIELDS: Use None.NONE sentinel pattern with volatile
+  private fun CacheField.spec(isBaselineStrategy: Boolean): PropertySpec {
+      // Both SMART_CACHE and BASELINE use volatile for proper memory visibility
+      val builder = if (isBaselineStrategy) {
+        // BASELINE: Use None.NONE sentinel pattern with volatile
         PropertySpec.builder(name, Any::class, KModifier.PRIVATE)
             .mutable(true)
             .addAnnotation(Volatile::class)
@@ -345,38 +376,36 @@ object KotlinCodeGenerator {
           .build()
 
   private fun FactoryProviderMethod.specs(
-      useSynchronized: Boolean,
+      isBaselineStrategy: Boolean,
       perDependencyLockFields: PerDependencyLockFields?
   ): List<FunSpec> {
     val primarySpec =
         FunSpec.builder(name)
             .addModifiers(KModifier.INTERNAL)
             .returns(returnTypeName.reloadedForTypeArgs(env))
-            .addCode(body.spec(useSynchronized, perDependencyLockFields, name))
+            .addCode(body.spec(isBaselineStrategy, perDependencyLockFields, name))
             .build()
     val spreadSpecs = spreadProviderMethods.map { it.spec() }
     return listOf(primarySpec) + spreadSpecs
   }
 
   private fun FactoryProviderMethodBody.spec(
-      useSynchronized: Boolean,
+      isBaselineStrategy: Boolean,
       perDependencyLockFields: PerDependencyLockFields?,
       providerMethodName: String
   ): CodeBlock =
       when (this) {
-        is FactoryProviderMethodBody.Cached -> spec(useSynchronized, perDependencyLockFields, providerMethodName)
+        is FactoryProviderMethodBody.Cached -> spec(isBaselineStrategy, perDependencyLockFields, providerMethodName)
         is FactoryProviderMethodBody.Uncached -> spec()
       }
 
   private fun FactoryProviderMethodBody.Cached.spec(
-      useSynchronized: Boolean,
+      isBaselineStrategy: Boolean,
       perDependencyLockFields: PerDependencyLockFields?,
       providerMethodName: String
   ): CodeBlock {
-    // Strategy 1: SMART_CACHE with nullable lock pattern
-    // Uses null initialization with double-checked locking
-    // Lock fields are nullable and initialized based on MotifRuntimeConfig.usePerDependencyLock (checked in constructor)
-    if (!useSynchronized) {
+    // SMART_CACHE: Uses null initialization with double-checked locking
+    if (!isBaselineStrategy) {
         val localFieldName = "_$cacheFieldName"
 
         // Get the lock field name for this cache field (if per-dependency locks are enabled)
@@ -408,8 +437,7 @@ object KotlinCodeGenerator {
             .build()
     }
 
-    // Strategy 2: VOLATILE_FIELDS - use None.NONE sentinel with nullable lock pattern
-    // Lock fields are nullable and initialized based on MotifRuntimeConfig.usePerDependencyLock (checked in constructor)
+    // BASELINE: Use None.NONE sentinel with synchronized blocks
 
     // Get the lock field name for this cache field (if per-dependency locks are enabled)
     val lockFieldName = perDependencyLockFields?.locks?.get(cacheFieldName)
@@ -559,7 +587,7 @@ object KotlinCodeGenerator {
           .addMember(names.joinToString(", ") { "%S" }, *names)
           .build()
 
-  // ===== Static Dependency Class for Selective Caching =====
+  // ===== Static Dependency Classes =====
 
   private fun StaticDependencyClass.spec(): TypeSpec {
     return TypeSpec.classBuilder(className)
@@ -586,7 +614,6 @@ object KotlinCodeGenerator {
             )
           }
 
-          // Add primary constructor
           primaryConstructor(constructorSpec())
 
           // Add dependency methods (using static class context)

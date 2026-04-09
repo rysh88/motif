@@ -13,11 +13,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package motif.sample.example2;
+package testcases.KT008_baseline_caching
 
-import motif.Scope;
+import motif.CachingStrategy
+import motif.Scope
 
-@Scope
-public interface ExampleChildScope {
-    Listener listener();
+@Scope(cachingStrategy = CachingStrategy.BASELINE)
+interface Scope {
+
+    fun cachedString(): String
+
+    fun cachedInteger(): Int
+
+    @motif.Objects
+    open class Objects {
+
+        fun cachedString(): String {
+            return "cached_${Counter.stringCounter++}"
+        }
+
+        fun cachedInteger(): Int {
+            return Counter.intCounter++
+        }
+    }
+}
+
+object Counter {
+    var stringCounter = 0
+    var intCounter = 0
 }

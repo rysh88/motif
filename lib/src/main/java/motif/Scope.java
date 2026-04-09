@@ -19,7 +19,7 @@ public @interface Scope {
   /**
    * Defines the caching strategy for scoped dependencies.
    *
-   * @return the caching strategy to use (default: VOLATILE_FIELDS)
+   * @return the caching strategy to use (default: BASELINE)
    */
-  CachingStrategy cachingStrategy() default CachingStrategy.VOLATILE_FIELDS;
+  CachingStrategy cachingStrategy() default CachingStrategy.BASELINE;
 }

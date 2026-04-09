@@ -108,11 +108,11 @@ private constructor(
 
     fun create(): List<ScopeImpl> {
       // For RUNTIME_SELECTABLE, generate both implementations
-      // VOLATILE_FIELDS = control (no selective caching)
-      // SMART_CACHE = treatment (with selective caching optimization)
+      // BASELINE = without selective caching
+      // SMART_CACHE = with selective caching optimization
       if (cachingStrategy == motif.CachingStrategy.RUNTIME_SELECTABLE) {
         return listOf(
-          createForStrategy(motif.CachingStrategy.VOLATILE_FIELDS, "_VolatileFields", forceNoSelectiveCaching = true),
+          createForStrategy(motif.CachingStrategy.BASELINE, "_Baseline", forceNoSelectiveCaching = true),
           createForStrategy(motif.CachingStrategy.SMART_CACHE, "_SmartCache", forceNoSelectiveCaching = false),
           createDynamicWrapper()
         )
@@ -128,7 +128,7 @@ private constructor(
       // The dynamic wrapper needs the Dependencies interface so variant implementations can reference it
       // It also needs to delegate all interface methods to the selected variant implementation
       return ScopeImpl(
-          useSynchronized = false,
+          isBaselineStrategy = false,
           className = scope.implClassName,
           superClassName = scope.typeName,
           internalScope = isInternal,
@@ -138,7 +138,7 @@ private constructor(
           perDependencyLockFields = null,
           cacheFields = emptyList(),
           constructor = constructor(),
-          alternateConstructor = null,
+          alternateConstructor = alternateConstructor(),
           accessMethodImpls = accessMethodImpls(), // Wrapper needs to delegate interface methods
           childMethodImpls = childMethodImpls(scope.implClassName, false), // Wrapper needs to delegate child methods
           scopeProviderMethod = scopeProviderMethod(),
@@ -147,7 +147,7 @@ private constructor(
           objectsImpl = null, // Variants have their own Objects implementation
           dependencies = dependencies(),
           staticDependencyClasses = emptyList(),
-          isDynamicWrapper = true,
+          isRuntimeSelectableWrapper = true,
       )
     }
 
@@ -158,8 +158,8 @@ private constructor(
     ): ScopeImpl {
       val isInternal = (scope.clazz as? CompilerClass)?.isInternal() ?: false
 
-      // SMART_CACHE uses per-dependency locks, VOLATILE_FIELDS uses synchronized(this)
-      val useSynchronized = strategy == motif.CachingStrategy.VOLATILE_FIELDS
+      // SMART_CACHE uses per-dependency locks, BASELINE uses synchronized(this)
+      val isBaselineStrategy = strategy == motif.CachingStrategy.BASELINE
 
       // Selective caching only if not forced off (DYNAMIC_MODE forces it off)
       val useSelectiveCaching = !forceNoSelectiveCaching && strategy == motif.CachingStrategy.SMART_CACHE
@@ -172,20 +172,19 @@ private constructor(
         scope.implClassName
       }
 
-      // Only use static classes when selective caching is enabled (SMART_CACHE)
-      // For VOLATILE_FIELDS, always use anonymous classes (even in variants) to match main branch behavior
+      // Use static classes for SMART_CACHE, anonymous classes for BASELINE
       val shouldUseStaticClasses = useSelectiveCaching
 
       return ScopeImpl(
-          useSynchronized,
+          isBaselineStrategy,
           implClassName,
           scope.typeName,
           isInternal,
           scopeImplAnnotation(),
           objectsField(implClassName),
           dependenciesField(),
-          // Generate per-dependency locks for both SMART_CACHE and VOLATILE_FIELDS
-          perDependencyLockFields(useSelectiveCaching, useSynchronized),
+          // Generate per-dependency locks for both SMART_CACHE and BASELINE
+          perDependencyLockFields(useSelectiveCaching, isBaselineStrategy),
           cacheFields(useSelectiveCaching),
           constructor(),
           alternateConstructor(),
@@ -219,7 +218,7 @@ private constructor(
      * and the current caching strategy.
      *
      * @param factoryMethod The factory method to check
-     * @param useSelectiveCaching True if using SMART_CACHE (selective caching), false for VOLATILE_FIELDS
+     * @param useSelectiveCaching True if using SMART_CACHE (selective caching), false for BASELINE
      * @return true if caching should be skipped, false otherwise
      */
     private fun shouldSkipCaching(factoryMethod: FactoryMethod, useSelectiveCaching: Boolean): Boolean {
@@ -243,51 +242,22 @@ private constructor(
 
         return if (useSelectiveCaching) {
             // For selective caching: skip cache for internal-only, single-use dependencies
-            val beforeCount = cachedMethods.size
-            val selectedMethods = cachedMethods.filter { shouldCache(it) }
-            val afterCount = selectedMethods.size
-            val removed = beforeCount - afterCount
-            println("[SMART_CACHE] ${scope.typeName}: Reduced cache fields from $beforeCount to $afterCount (removed $removed)")
-
-            selectedMethods.map { factoryMethod ->
-                val cacheFieldName = getCacheFieldName(factoryMethod.returnType.type)
-                if (cacheFieldName.isEmpty()) {
-                    throw RuntimeException(
-                        """
-                        [MOTIF DEBUG] Empty cache field name detected in SMART_CACHE!
-                          Scope: ${scope.typeName}
-                          Method: ${factoryMethod.method.name}
-                          Return Type: ${factoryMethod.returnType.type}
-                        """.trimIndent()
-                    )
-                }
-                CacheField(cacheFieldName)
+            cachedMethods.filter { shouldCache(it) }.map { factoryMethod ->
+                CacheField(getCacheFieldName(factoryMethod.returnType.type))
             }
         } else {
             cachedMethods.map { factoryMethod ->
-                val cacheFieldName = getCacheFieldName(factoryMethod.returnType.type)
-
-                if (cacheFieldName.isEmpty()) {
-                    throw RuntimeException(
-                        """
-                        [MOTIF DEBUG] Empty cache field name detected in VOLATILE_FIELDS!
-                          Scope: ${scope.typeName}
-                          Method: ${factoryMethod.method.name}
-                          Return Type: ${factoryMethod.returnType.type}
-                        """.trimIndent()
-                    )
-                }
-                CacheField(cacheFieldName)
+                CacheField(getCacheFieldName(factoryMethod.returnType.type))
             }
         }
     }
 
     /**
-     * Creates per-dependency lock fields for both SMART_CACHE and VOLATILE_FIELDS strategies.
+     * Creates per-dependency lock fields for both SMART_CACHE and BASELINE strategies.
      * Lock fields are nullable and initialized conditionally in the constructor based on
      * MotifRuntimeConfig.usePerDependencyLock (checked once at construction time).
      */
-    private fun perDependencyLockFields(useSelectiveCaching: Boolean, useSynchronized: Boolean): PerDependencyLockFields? {
+    private fun perDependencyLockFields(useSelectiveCaching: Boolean, isBaselineStrategy: Boolean): PerDependencyLockFields? {
         // Get all cached dependencies (different filtering based on strategy)
         val cachedMethods = if (useSelectiveCaching) {
             // SMART_CACHE: Only methods that pass shouldCache() check
@@ -295,7 +265,7 @@ private constructor(
                 !shouldSkipCaching(it, useSelectiveCaching) && shouldCache(it)
             }
         } else {
-            // VOLATILE_FIELDS: All methods that aren't explicitly skipped
+            // BASELINE: All methods that aren't explicitly skipped
             scope.factoryMethods.filter {
                 !shouldSkipCaching(it, useSelectiveCaching)
             }
@@ -308,11 +278,8 @@ private constructor(
             cacheFieldName to lockFieldName
         }
 
-        if (locks.isNotEmpty()) {
-            val strategy = if (useSynchronized) "VOLATILE_FIELDS" else "SMART_CACHE"
-            println("[$strategy] ${scope.typeName}: Generated ${locks.size} per-dependency lock fields")
-        }
-
+        // Return null if no locks are needed (no cached dependencies)
+        // This prevents generating empty lock field declarations
         return if (locks.isEmpty()) null else PerDependencyLockFields(locks)
     }
 
@@ -338,8 +305,9 @@ private constructor(
 
         // Detect cycles (shouldn't happen with valid DI graphs, but be defensive)
         if (returnType in shouldCacheComputing) {
-            // Conservative: assume it should be cached if we hit a cycle
-            return !factoryMethod.hasDoNotCache
+            // Conservative: cache dependencies involved in cycles to break the cycle
+            // Unless explicitly marked with @DoNotCache for all modes (not just SmartCache)
+            return !factoryMethod.hasDoNotCache || factoryMethod.doNotCacheOnlyForSmartCache
         }
 
         // Mark as computing to detect cycles
@@ -359,18 +327,14 @@ private constructor(
      */
     private fun computeShouldCache(factoryMethod: FactoryMethod): Boolean {
         val returnType = factoryMethod.returnType.type
-        val typeName = returnType.type.simpleName
-        val scopeName = scope.clazz.type.simpleName
 
         // Rule 1: If method has @DoNotCache annotation, never cache
         if (factoryMethod.hasDoNotCache) {
-            println("[SMART_CACHE] $scopeName.$typeName: Skipped cache - has @DoNotCache annotation")
             return false
         }
 
         // Rule 2: Skip cache if return type has @DoNotCache annotation
-        if (hasDoNotCacheAnnotation(returnType) ) {
-            println("[SMART_CACHE] $scopeName.$typeName: Skipped cache - type has @DoNotCache annotation")
+        if (hasDoNotCacheAnnotation(returnType)) {
             return false
         }
 
@@ -380,15 +344,13 @@ private constructor(
         // are kept as-is since the user wrote them explicitly.
         // Example: abstract Context context(AppCompatActivity activity)
         if (isPassthroughMethod(factoryMethod)) {
-            println("[SMART_CACHE] $scopeName.$typeName: Skipped cache - is passthrough method")
             return false
         }
 
         // Rule 4: Check if this dependency has public accessor method
         // If yes, it can be called from outside, so always cache
         val hasAccessor = scope.accessMethods.any { it.returnType == returnType }
-        if(hasAccessor) {
-            println("[SMART_CACHE] $scopeName.$typeName: Cached - has accessor method")
+        if (hasAccessor) {
             return true
         }
 
@@ -396,14 +358,12 @@ private constructor(
         val usageCount = countInternalUsage(returnType)
 
         // Rule 5: Dead code - not used at all, never cache
-        if(usageCount == 0) {
-            println("[SMART_CACHE] $scopeName.$typeName: Skipped cache - not used (dead code)")
+        if (usageCount == 0) {
             return false
         }
 
         // Rule 6: Used multiple times internally
         if (usageCount > 1) {
-            println("[SMART_CACHE] $scopeName.$typeName: Cached - used $usageCount times")
             return true
         }
 
@@ -411,7 +371,6 @@ private constructor(
         // Even if usageCount == 1, exposed methods can be called from outside the scope
         // (by parent scopes, child scopes, or external code), so cache them
         if (factoryMethod.isExposed) {
-            println("[SMART_CACHE] $scopeName.$typeName: Cached - has @Expose annotation")
             return true
         }
 
@@ -419,17 +378,7 @@ private constructor(
         // (If a non-cached method depends on this, it will be created multiple times)
         // Optimization: If usageCount = 1 and the only dependent is cached, we can skip caching
         // because the dependency will only be created once when the cached dependent is first created.
-        val shouldCache = !isDependentCreatedOnce(returnType)
-        if (shouldCache) {
-            val dependent = dependentsCache[returnType]?.singleOrNull()
-            val dependentName = dependent?.returnType?.type?.type?.simpleName ?: "unknown"
-            println("[SMART_CACHE] $scopeName.$typeName: Cached - used by dependent '$dependentName' which is not cached or used multiple times")
-        } else {
-            val dependent = dependentsCache[returnType]?.singleOrNull()
-            val dependentName = dependent?.returnType?.type?.type?.simpleName ?: "unknown"
-            println("[SMART_CACHE] $scopeName.$typeName: Skipped cache - used once by cached dependent '$dependentName'")
-        }
-        return shouldCache
+        return !isDependentCreatedOnce(returnType)
     }
 
     /**
@@ -666,6 +615,26 @@ private constructor(
         implClassName: ClassName,
         useStaticClasses: Boolean
     ): ChildDependenciesImpl {
+      // Validate that no two parameters have the same type (Motif doesn't support this without qualifiers)
+      val duplicateTypes = childEdge.method.parameters
+          .groupBy { it.type }
+          .filter { it.value.size > 1 }
+
+      if (duplicateTypes.isNotEmpty()) {
+          val duplicateTypesList = duplicateTypes.keys.joinToString(", ") { it.simpleName }
+          throw IllegalStateException(
+              """
+              Child method has multiple parameters of the same type, which is not supported.
+              Scope: ${scope.typeName}
+              Child scope: ${childEdge.child.typeName}
+              Method: ${childEdge.method.method.name}
+              Duplicate types: $duplicateTypesList
+
+              To fix this, use @Named or other qualifiers to distinguish parameters of the same type.
+              """.trimIndent()
+          )
+      }
+
       val parameters: Map<Type, ChildMethod.Parameter> =
           childEdge.method.parameters.associateBy { parameter -> parameter.type }
       val dependencyMethodImpls =
@@ -1004,15 +973,26 @@ private constructor(
       return providerMethodNames.computeIfAbsent(type) { methodNameScope.name(type) }
     }
 
-    private fun getCacheFieldName(type: Type) =
-        cacheFieldNames.computeIfAbsent(type) { fieldNameScope.name(type) }
+    private fun getCacheFieldName(type: Type): String {
+        val fieldName = cacheFieldNames.computeIfAbsent(type) { fieldNameScope.name(type) }
+        if (fieldName.isEmpty()) {
+            throw IllegalStateException(
+                """
+                Generated empty cache field name for type: ${type.qualifiedName}
+                Scope: ${scope.typeName}
+                This indicates a bug in the name generation logic.
+                """.trimIndent()
+            )
+        }
+        return fieldName
+    }
 
     /**
      * Resolves caching strategy from @Scope annotation.
      */
     private fun resolveCachingStrategy(scopeAnnotation: motif.ast.IrAnnotation): motif.CachingStrategy {
         val strategyValue = scopeAnnotation.annotationValueMap[SCOPE_ANNOTATION_FIELD_CACHING_STRATEGY]
-            ?: return motif.CachingStrategy.VOLATILE_FIELDS
+            ?: return motif.CachingStrategy.BASELINE
 
         return when (strategyValue.toString()) {
             "SMART_CACHE" -> motif.CachingStrategy.SMART_CACHE
@@ -1020,8 +1000,8 @@ private constructor(
             "DYNAMIC_MODE" -> motif.CachingStrategy.RUNTIME_SELECTABLE  // backward compatibility
             "OPTIMIZED_MULTI_LOCK" -> motif.CachingStrategy.SMART_CACHE  // backward compatibility
             "VOLATILE_FIELDS_SELECTIVE" -> motif.CachingStrategy.SMART_CACHE  // backward compatibility
-            "VOLATILE_FIELDS" -> motif.CachingStrategy.VOLATILE_FIELDS
-            else -> motif.CachingStrategy.VOLATILE_FIELDS
+            "BASELINE" -> motif.CachingStrategy.BASELINE
+            else -> motif.CachingStrategy.BASELINE
         }
     }
   }
