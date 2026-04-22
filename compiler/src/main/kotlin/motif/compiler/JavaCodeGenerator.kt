@@ -71,7 +71,6 @@ object JavaCodeGenerator {
                 if (lockFields.locks.isNotEmpty()) {
                     addField(
                         FieldSpec.builder(Boolean::class.javaPrimitiveType, "usePerDependencyLocking", Modifier.PRIVATE, Modifier.FINAL)
-                            .initializer("%T.usePerDependencyLock", com.squareup.javapoet.ClassName.get("motif", "MotifRuntimeConfig"))
                             .build()
                     )
                 }
@@ -105,33 +104,28 @@ object JavaCodeGenerator {
    */
   private fun ScopeImpl.wrapperSpec(): TypeSpec {
     val delegateField = FieldSpec.builder(superClassName.j, "delegate", Modifier.PRIVATE, Modifier.FINAL)
-        .initializer(
-            CodeBlock.builder()
-                .beginControlFlow("(%T.cachingStrategy == %T.BASELINE_WITH_LOCK_SELECTABLE)",
-                    com.squareup.javapoet.ClassName.get("motif", "MotifRuntimeConfig"),
-                    com.squareup.javapoet.ClassName.get("motif", "CachingStrategy"))
-                .add("? new %T(dependencies)\n",
-                    com.squareup.javapoet.ClassName.get(
-                        className.j.packageName(),
-                        className.j.simpleName() + "_BaselineSelectableLock"
-                    ))
-                .nextControlFlow("else if (%T.cachingStrategy == %T.SMART_CACHE)",
-                    com.squareup.javapoet.ClassName.get("motif", "MotifRuntimeConfig"),
-                    com.squareup.javapoet.ClassName.get("motif", "CachingStrategy"))
-                .add("? new %T(dependencies)\n",
-                    com.squareup.javapoet.ClassName.get(
-                        className.j.packageName(),
-                        className.j.simpleName() + "_SmartCache"
-                    ))
-                .nextControlFlow("else")
-                .add(": new %T(dependencies))",
-                    com.squareup.javapoet.ClassName.get(
-                        className.j.packageName(),
-                        className.j.simpleName() + "_BaselineSelectableLock"
-                    ))
-                .endControlFlow()
-                .build()
-        )
+        .build()
+
+    //Create constructor that initializes delegate based on runtime config
+    val wrapperConstructor = MethodSpec.constructorBuilder()
+        .addModifiers(Modifier.PUBLIC)
+        .addParameter(dependenciesField.dependenciesClassName.j, "dependencies")
+        .addStatement("this.dependencies = dependencies")
+        .beginControlFlow("if (\$T.cachingStrategy == \$T.SMART_CACHE)",
+            com.squareup.javapoet.ClassName.get("motif", "MotifRuntimeConfig"),
+            com.squareup.javapoet.ClassName.get("motif", "CachingStrategy"))
+        .addStatement("this.delegate = new \$T(dependencies)",
+            com.squareup.javapoet.ClassName.get(
+                className.j.packageName(),
+                className.j.simpleName() + "_SmartCache"
+            ))
+        .nextControlFlow("else")
+        .addStatement("this.delegate = new \$T(dependencies)",
+            com.squareup.javapoet.ClassName.get(
+                className.j.packageName(),
+                className.j.simpleName() + "_BaselineSelectableLock"
+            ))
+        .endControlFlow()
         .build()
 
     return TypeSpec.classBuilder(className.j)
@@ -146,8 +140,8 @@ object JavaCodeGenerator {
           // Add dependencies field
           addField(dependenciesField.spec())
 
-          // Add constructor
-          addMethod(constructor.spec(null))
+          // Add custom wrapper constructor
+          addMethod(wrapperConstructor)
 
           // Add alternate constructor if present
           alternateConstructor?.let { addMethod(it.spec()) }
@@ -229,6 +223,12 @@ object JavaCodeGenerator {
         .addModifiers(Modifier.PUBLIC)
         .addParameter(dependenciesClassName.j, dependenciesParameterName)
         .addStatement("this.\$N = \$N", dependenciesFieldName, dependenciesParameterName)
+
+    // Initialize usePerDependencyLocking from runtime config
+    if (perDependencyLockFields != null && perDependencyLockFields.locks.isNotEmpty()) {
+        builder.addStatement("this.usePerDependencyLocking = \$T.usePerDependencyLock",
+            com.squareup.javapoet.ClassName.get("motif", "MotifRuntimeConfig"))
+    }
 
     // Initialize lock fields conditionally based on usePerDependencyLocking
     perDependencyLockFields?.locks?.values?.forEach { lockFieldName ->

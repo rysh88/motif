@@ -114,40 +114,42 @@ object KotlinCodeGenerator {
    * Generates a runtime wrapper class for RUNTIME_SELECTABLE strategy.
    * The wrapper delegates to variant implementations based on MotifRuntimeConfig.cachingStrategy.
    */
-  private fun ScopeImpl.wrapperSpec(): TypeSpec =
-      TypeSpec.classBuilder(className.kt)
-          .apply {
-            addAnnotation(suppressAnnotationSpec("REDUNDANT_PROJECTION", "UNCHECKED_CAST"))
-            addAnnotation(scopeImplAnnotation.spec())
-            addModifiers(if (internalScope) KModifier.INTERNAL else KModifier.PUBLIC)
-            addSuperinterface(superClassName.kt)
+  private fun ScopeImpl.wrapperSpec(): TypeSpec {
+    // Create custom constructor with delegate initialization
+    val wrapperConstructor = FunSpec.constructorBuilder()
+        .addParameter(dependenciesField.name, dependenciesField.dependenciesClassName.kt)
+        .build()
 
-            // Add delegate property that selects implementation based on runtime config
-            addProperty(
-                PropertySpec.builder("delegate", superClassName.kt, KModifier.PRIVATE)
-                    .initializer(
-                        CodeBlock.builder()
-                            .add("when (%T.cachingStrategy) {\n", ClassName.bestGuess("motif.MotifRuntimeConfig"))
-                            .indent()
-                            .add("%T.BASELINE_WITH_LOCK_SELECTABLE -> %T_BaselineSelectableLock(dependencies)\n",
-                                ClassName.bestGuess("motif.CachingStrategy"),
-                                className.kt)
-                            .add("%T.SMART_CACHE -> %T_SmartCache(dependencies)\n",
-                                ClassName.bestGuess("motif.CachingStrategy"),
-                                className.kt)
-                            .add("else -> %T_BaselineSelectableLock(dependencies)\n", className.kt)
-                            .unindent()
-                            .add("}")
-                            .build()
-                    )
-                    .build()
-            )
+    return TypeSpec.classBuilder(className.kt)
+        .apply {
+          addAnnotation(suppressAnnotationSpec("REDUNDANT_PROJECTION", "UNCHECKED_CAST"))
+          addAnnotation(scopeImplAnnotation.spec())
+          addModifiers(if (internalScope) KModifier.INTERNAL else KModifier.PUBLIC)
+          addSuperinterface(superClassName.kt)
 
-            // Add dependencies field
-            addProperty(dependenciesField.spec())
+          // Add dependencies field
+          addProperty(dependenciesField.spec())
 
-            // Add primary constructor
-            primaryConstructor(constructor.spec())
+          // Add delegate property with initializer in init block
+          addProperty(
+              PropertySpec.builder("delegate", superClassName.kt, KModifier.PRIVATE)
+                  .initializer(
+                      CodeBlock.builder()
+                          .add("when (%T.cachingStrategy) {\n", ClassName.bestGuess("motif.MotifRuntimeConfig"))
+                          .indent()
+                          .add("%T.SMART_CACHE -> %T_SmartCache(dependencies)\n",
+                              ClassName.bestGuess("motif.CachingStrategy"),
+                              className.kt)
+                          .add("else -> %T_BaselineSelectableLock(dependencies)\n", className.kt)
+                          .unindent()
+                          .add("}")
+                          .build()
+                  )
+                  .build()
+          )
+
+          // Add primary constructor
+          primaryConstructor(wrapperConstructor)
 
             // Add alternate constructor if present
             alternateConstructor?.let { addFunction(it.spec()) }
@@ -157,9 +159,7 @@ object KotlinCodeGenerator {
                 .filter { !it.overriddenMethod.isSynthetic }
                 .forEach {
                     addFunction(
-                        FunSpec.builder(it.overriddenMethod.name)
-                            .addModifiers(KModifier.PUBLIC, KModifier.OVERRIDE)
-                            .returns(ClassName.bestGuess(it.overriddenMethod.returnType.qualifiedName))
+                        XFunSpec.overriding(it.overriddenMethod.element, it.overriddenMethod.owner, it.env)
                             .addStatement("return delegate.%N()", it.overriddenMethod.name)
                             .build()
                     )
@@ -211,6 +211,7 @@ object KotlinCodeGenerator {
             objectsImpl?.let { addType(it.spec()) }
           }
           .build()
+  }
 
   private fun ScopeImplAnnotation.spec(): AnnotationSpec =
       AnnotationSpec.builder(motif.ScopeImpl::class)
