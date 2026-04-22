@@ -13,34 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package testcases.T077_use_null_field_init_java;
+package testcases.KT010_smart_cache_selective_caching_kotlin
 
-import motif.Creatable;
-
-@motif.Scope(cachingStrategy = motif.CachingStrategy.SMART_CACHE)
-public interface Scope extends Creatable<Scope.Dependencies> {
-
-    Object fooObject();
-
-    int fooInt();
-
-    String fooString();
-
-    @motif.Objects
-    class Objects {
-
-        Object fooObject() {
-            return new Object();
-        }
-
-        int fooInt() {
-            return 3;
-        }
-
-        String fooString() {
-            return "fooString";
-        }
-    }
-
-    interface Dependencies {}
-}
+class DoNotCacheDep

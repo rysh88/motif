@@ -17,7 +17,7 @@ package testcases.KT009_use_null_field_concurrency_kotlin
 
 import motif.Creatable
 
-@motif.Scope(useNullFieldInitialization = true)
+@motif.Scope(cachingStrategy = motif.CachingStrategy.SMART_CACHE)
 interface Scope : Creatable<Scope.Dependencies> {
     fun fooObject(): Any
 

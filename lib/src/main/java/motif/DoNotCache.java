@@ -15,4 +15,19 @@
  */
 package motif;
 
-public @interface DoNotCache {}
+/**
+ * Annotation to prevent caching of dependencies in Motif DI framework.
+ *
+ * When applied to a factory method or type, prevents the dependency from being cached.
+ * By default, applies to all caching strategies. Use onlyForSmartCacheMode = true
+ * to apply only to SMART_CACHE mode while still caching in BASELINE mode.
+ */
+public @interface DoNotCache {
+  /**
+   * If true, only applies to SMART_CACHE mode. Dependencies will still be cached
+   * when using BASELINE mode.
+   *
+   * Default: false (applies to all caching strategies)
+   */
+  boolean onlyForSmartCacheMode() default false;
+}

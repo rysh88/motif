@@ -13,32 +13,37 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package testcases.T077_use_null_field_init_java;
+package testcases.T086_dead_code_detection;
 
 import motif.Creatable;
 
 @motif.Scope(cachingStrategy = motif.CachingStrategy.SMART_CACHE)
 public interface Scope extends Creatable<Scope.Dependencies> {
 
-    Object fooObject();
+    // Consumer uses UsedDep
+    Consumer consumer();
 
-    int fooInt();
-
-    String fooString();
+    // Note: unusedDep() is a factory method but it's NOT exposed via public accessor
+    // and it's not used internally by any other dependency.
+    // Rule 5: Dead code (usage count = 0) should NOT be cached
 
     @motif.Objects
     class Objects {
 
-        Object fooObject() {
-            return new Object();
+        // Dead code: not used by anyone, not exposed
+        // SMART_CACHE should detect usage count = 0 and skip caching
+        UnusedDep unusedDep() {
+            return new UnusedDep();
         }
 
-        int fooInt() {
-            return 3;
+        // Used dependency: used by consumer
+        // Should be cached (used internally)
+        UsedDep usedDep() {
+            return new UsedDep();
         }
 
-        String fooString() {
-            return "fooString";
+        Consumer consumer(UsedDep usedDep) {
+            return new Consumer(usedDep);
         }
     }
 

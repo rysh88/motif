@@ -17,7 +17,7 @@ package testcases.T078_use_null_field_concurrency_java;
 
 import motif.Creatable;
 
-@motif.Scope(useNullFieldInitialization = true)
+@motif.Scope(cachingStrategy = motif.CachingStrategy.SMART_CACHE)
 public interface Scope extends Creatable<Scope.Dependencies> {
 
     Object fooObject();

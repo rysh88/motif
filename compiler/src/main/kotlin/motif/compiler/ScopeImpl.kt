@@ -35,7 +35,7 @@ import motif.ast.compiler.CompilerMethod
  * implementations.
  */
 class ScopeImpl(
-    val useNullFieldInitialization: Boolean,
+    val isBaselineStrategy: Boolean,
     val className: ClassName,
     val superClassName: ClassName,
     val internalScope: Boolean,
@@ -43,6 +43,7 @@ class ScopeImpl(
     val objectsField: ObjectsField?,
     val dependenciesField: DependenciesField,
     val cacheFields: List<CacheField>,
+    val perDependencyLockFields: PerDependencyLockFields?,
     val constructor: Constructor,
     val alternateConstructor: AlternateConstructor?,
     val accessMethodImpls: List<AccessMethodImpl>,
@@ -52,6 +53,24 @@ class ScopeImpl(
     val dependencyProviderMethods: List<DependencyProviderMethod>,
     val objectsImpl: ObjectsImpl?,
     val dependencies: Dependencies?,
+    /**
+     * True if this ScopeImpl represents the runtime wrapper for RUNTIME_SELECTABLE strategy.
+     * The wrapper delegates to variant classes based on MotifRuntimeConfig.cachingStrategy.
+     * False for normal implementations and variant classes.
+     */
+    val isRuntimeSelectableWrapper: Boolean = false,
+    /**
+     * Suffix appended to the class name for variant classes in RUNTIME_SELECTABLE strategy.
+     * Examples: "_BaselineSelectableLock", "_SmartCache"
+     * Null for normal implementations and wrapper classes.
+     */
+    val variantSuffix: String? = null,
+    /**
+     * Static dependency classes for child scopes (SMART_CACHE strategy only).
+     * These replace anonymous classes to reduce memory overhead by avoiding closure captures.
+     * Empty for BASELINE strategies.
+     */
+    val staticDependencyClasses: List<StaticDependencyClass> = emptyList(),
 )
 
 /**
@@ -93,6 +112,21 @@ class DependenciesField(val dependenciesClassName: ClassName, val name: String)
  * ```
  */
 class CacheField(val name: String)
+
+/**
+ * Per-dependency lock fields for BASELINE_WITH_LOCK_SELECTABLE strategy.
+ *
+ * ```
+ * private final MotifLock lock_foo;
+ * private final MotifLock lock_bar;
+ * ```
+ *
+ * Maps cache field names to their corresponding lock field names.
+ * Lock fields are nullable and conditionally initialized based on MotifRuntimeConfig.usePerDependencyLock.
+ */
+class PerDependencyLockFields(
+    val locks: Map<String, String>  // Map<cacheFieldName, lockFieldName>
+)
 
 /**
  * ```
@@ -161,12 +195,32 @@ class ChildMethodImplParameter(val typeName: TypeName, val name: String)
  *     [ ChildDependencyMethodImpls ]
  * }
  * ```
+ *
+ * Or when using static classes (SMART_CACHE strategy):
+ * ```
+ * new PhotoGridScopeDependencies(this, viewGroup)
+ * ```
  */
 class ChildDependenciesImpl(
     val childDependenciesClassName: ClassName,
     val methods: List<ChildDependencyMethodImpl>,
     val isAbstractClass: Boolean,
     val env: XProcessingEnv,
+    /**
+     * True if this child dependencies should use a static class instead of anonymous class.
+     * Used for SMART_CACHE strategy to reduce memory overhead.
+     */
+    val useStaticClass: Boolean = false,
+    /**
+     * Name of the static class to instantiate (e.g., "PhotoGridScopeDependencies").
+     * Null if using anonymous class.
+     */
+    val staticClassName: String? = null,
+    /**
+     * Parent scope's class name, used for static class field reference.
+     * Null if using anonymous class.
+     */
+    val parentScopeClassName: ClassName? = null,
 )
 
 /**
@@ -411,6 +465,38 @@ class ObjectsAbstractMethod(
     // Required work around https://github.com/square/javapoet/issues/656
     val env: XProcessingEnv,
     val overriddenMethod: CompilerMethod,
+)
+
+/**
+ * Static dependency class for child scopes (SMART_CACHE strategy).
+ *
+ * Replaces anonymous classes to reduce memory overhead by avoiding closure captures.
+ * ```
+ * private static class PhotoGridScopeDependencies implements PhotoGridScope.Dependencies {
+ *     private final RootScopeImpl parentScope;
+ *     private final ViewGroup viewGroup;
+ *
+ *     PhotoGridScopeDependencies(RootScopeImpl parentScope, ViewGroup viewGroup) {
+ *         this.parentScope = parentScope;
+ *         this.viewGroup = viewGroup;
+ *     }
+ *
+ *     @Override
+ *     public ViewGroup viewGroup() { return viewGroup; }
+ *
+ *     @Override
+ *     public Database database() { return parentScope.database(); }
+ * }
+ * ```
+ */
+class StaticDependencyClass(
+    val className: String,
+    val childDependenciesClassName: ClassName,
+    val parentScopeClassName: ClassName,
+    val isAbstractClass: Boolean,
+    val methods: List<ChildDependencyMethodImpl>,
+    val methodParameters: List<ChildMethodImplParameter>,
+    val env: XProcessingEnv,
 )
 
 class TypeName private constructor(private val mirror: XType) {

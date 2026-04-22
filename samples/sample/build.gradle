@@ -35,7 +35,6 @@ android {
 }
 
 dependencies {
-    annotationProcessor deps.butterknifeCompiler
     annotationProcessor deps.glideCompiler
     annotationProcessor project(':compiler')
     implementation project(':samples-sample-lib')
@@ -43,7 +42,6 @@ dependencies {
     implementation deps.glide
     implementation deps.stetho
     implementation deps.support.design
-    implementation deps.butterknife
 
     testImplementation deps.test.junit
     testImplementation deps.test.truth
