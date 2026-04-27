@@ -114,6 +114,11 @@ private constructor(
 
     private fun createWrapper(): ScopeImpl {
       val isInternal = (scope.clazz as? CompilerClass)?.isInternal() ?: false
+      // Wrapper generates the Dependencies nested class that variants will reference
+      val scopeAnnotation = scope.clazz.annotations
+          .find { it.className == motif.Scope::class.java.name }!!
+      val cachingStrategy = resolveCachingStrategy(scopeAnnotation)
+
       return ScopeImpl(
           isBaselineStrategy = true, // Not used for wrapper
           className = scope.implClassName,
@@ -127,12 +132,12 @@ private constructor(
           constructor = constructor(),
           alternateConstructor = alternateConstructor(),
           accessMethodImpls = accessMethodImpls(),
-          childMethodImpls = childMethodImpls(),
+          childMethodImpls = childMethodImpls(cachingStrategy, variantSuffix = null),
           scopeProviderMethod = scopeProviderMethod(),
           factoryProviderMethods = emptyList(), // Wrapper delegates instead
           dependencyProviderMethods = emptyList(), // Wrapper delegates instead
           objectsImpl = objectsImpl(), // Wrapper needs Objects nested class for variants to reference
-          dependencies = dependencies(),
+          dependencies = dependencies(forceGenerate = true), // Wrapper needs Dependencies nested class for variants to reference
           isRuntimeSelectableWrapper = true,
           variantSuffix = null,
       )
@@ -157,7 +162,7 @@ private constructor(
           constructor(),
           alternateConstructor(),
           accessMethodImpls(),
-          childMethodImpls(),
+          childMethodImpls(cachingStrategy, variantSuffix),
           scopeProviderMethod(),
           factoryProviderMethods(useSelectiveCaching),
           dependencyProviderMethods(),
@@ -165,7 +170,6 @@ private constructor(
           dependencies(),
           isRuntimeSelectableWrapper = false,
           variantSuffix = variantSuffix,
-          staticDependencyClasses = if (useSelectiveCaching) staticDependencyClasses() else emptyList(),
       )
     }
 
@@ -239,16 +243,16 @@ private constructor(
           )
         }
 
-    private fun childMethodImpls(): List<ChildMethodImpl> =
-        graph.getChildEdges(scope).map(this::childMethodImpl)
+    private fun childMethodImpls(cachingStrategy: motif.CachingStrategy, variantSuffix: String?): List<ChildMethodImpl> =
+        graph.getChildEdges(scope).map { childEdge -> childMethodImpl(childEdge, cachingStrategy, variantSuffix) }
 
-    private fun childMethodImpl(childEdge: ScopeEdge): ChildMethodImpl =
+    private fun childMethodImpl(childEdge: ScopeEdge, cachingStrategy: motif.CachingStrategy, variantSuffix: String?): ChildMethodImpl =
         ChildMethodImpl(
             childEdge.child.typeName,
             childEdge.child.implClassName,
             childEdge.method.method.name,
             childEdge.method.parameters.map(this::childMethodImplParameter),
-            childDependenciesImpl(childEdge),
+            childDependenciesImpl(childEdge, cachingStrategy, variantSuffix),
         )
 
     private fun childMethodImplParameter(
@@ -259,49 +263,41 @@ private constructor(
             childMethodParameter.parameter.name,
         )
 
-    private fun childDependenciesImpl(childEdge: ScopeEdge): ChildDependenciesImpl {
+    private fun childDependenciesImpl(childEdge: ScopeEdge, cachingStrategy: motif.CachingStrategy, variantSuffix: String?): ChildDependenciesImpl {
+      // For variants, use the variant class name (with suffix) for the parent scope class name
+      // This is needed because variants are separate top-level classes, not nested classes
+      val parentScopeClassName = if (variantSuffix != null) {
+        ClassName.get(scope.implClassName.j.packageName(), scope.implClassName.j.simpleName() + variantSuffix)
+      } else {
+        scope.implClassName
+      }
+
       val parameters: Map<Type, ChildMethod.Parameter> =
           childEdge.method.parameters.associateBy { parameter -> parameter.type }
       val dependencyMethodImpls =
           getDependencyMethodData(childEdge.child).map { methodData ->
-            childDependencyMethodImpl(parameters, methodData)
+            childDependencyMethodImpl(parameters, methodData, parentScopeClassName)
           }
       val isAbstractClass = dependencyMethodImpls.any { it.isInternal }
-
-      // Determine if we should use static class (for SMART_CACHE strategy)
-      val scopeAnnotation = scope.clazz.annotations
-          .find { it.className == motif.Scope::class.java.name }!!
-      val cachingStrategy = resolveCachingStrategy(scopeAnnotation)
-      val useSelectiveCaching = cachingStrategy == motif.CachingStrategy.SMART_CACHE
-
-      val (useStaticClass, staticClassName) = if (useSelectiveCaching) {
-        val methodName = childEdge.method.method.name
-        val className = "${methodName.replaceFirstChar { it.uppercase() }}Dependencies"
-        Pair(true, className)
-      } else {
-        Pair(false, null)
-      }
 
       return ChildDependenciesImpl(
           childEdge.child.dependenciesClassName,
           dependencyMethodImpls,
           isAbstractClass,
           env,
-          useStaticClass,
-          staticClassName,
-          scope.implClassName,
       )
     }
 
     private fun childDependencyMethodImpl(
         parameters: Map<Type, ChildMethod.Parameter>,
         methodData: DependencyMethodData,
+        parentScopeClassName: ClassName,
     ): ChildDependencyMethodImpl {
       val parameter = parameters[methodData.returnType]
       val returnExpression =
           if (parameter == null) {
             ChildDependencyMethodImpl.ReturnExpression.Provider(
-                scope.implClassName,
+                parentScopeClassName,
                 getProviderMethodName(methodData.returnType),
             )
           } else {
@@ -433,8 +429,8 @@ private constructor(
       )
     }
 
-    private fun dependencies(): Dependencies? {
-      if (scope.dependencies != null) {
+    private fun dependencies(forceGenerate: Boolean = false): Dependencies? {
+      if (!forceGenerate && scope.dependencies != null) {
         return null
       }
       val methods =
@@ -501,84 +497,6 @@ private constructor(
       }
 
       return type
-    }
-
-    // === Static Dependency Classes for SMART_CACHE ===
-
-    /**
-     * Generates static dependency classes for child scopes in SMART_CACHE mode.
-     * These replace anonymous classes to reduce memory overhead by avoiding closure captures.
-     * Includes deduplication: when multiple child methods have identical dependency implementations,
-     * they share a single static class.
-     */
-    private fun staticDependencyClasses(): List<StaticDependencyClass> {
-      val uniqueClasses = mutableMapOf<String, StaticDependencyClass>()
-
-      graph.getChildEdges(scope).forEach { childEdge ->
-        val parameters = childEdge.method.parameters
-        val methods = getDependencyMethodData(childEdge.child).map { methodData ->
-          val parametersMap = parameters.associateBy { it.type }
-          childDependencyMethodImpl(parametersMap, methodData)
-        }
-        val isAbstractClass = methods.any { it.isInternal }
-
-        // Create signature for deduplication
-        val signature = createStaticClassSignature(
-            childEdge.child.dependenciesClassName,
-            parameters.map { childMethodImplParameter(it) },
-            methods
-        )
-
-        if (signature !in uniqueClasses) {
-          val methodName = childEdge.method.method.name
-          val className = "${methodName.replaceFirstChar { it.uppercase() }}Dependencies"
-          uniqueClasses[signature] = StaticDependencyClass(
-              className,
-              childEdge.child.dependenciesClassName,
-              scope.implClassName,
-              isAbstractClass,
-              methods,
-              parameters.map { childMethodImplParameter(it) },
-              env,
-          )
-        }
-      }
-
-      return uniqueClasses.values.toList()
-    }
-
-    /**
-     * Creates a unique signature for a static dependency class to enable deduplication.
-     * Two child methods with identical signatures can share the same static class.
-     *
-     * Signature includes:
-     * - Child dependencies interface name
-     * - Method parameters (type and count)
-     * - Dependency method implementations (name, return type, source)
-     */
-    private fun createStaticClassSignature(
-        childDependenciesClassName: ClassName,
-        methodParameters: List<ChildMethodImplParameter>,
-        dependencyMethods: List<ChildDependencyMethodImpl>
-    ): String {
-      val parts = mutableListOf<String>()
-
-      // Include interface name
-      parts.add(childDependenciesClassName.j.toString())
-
-      // Include parameter types
-      parts.add(methodParameters.joinToString(",") { "${it.typeName.j}:${it.name}" })
-
-      // Include method implementations
-      parts.add(dependencyMethods.joinToString(";") { method ->
-        val source = when (val expr = method.returnExpression) {
-          is ChildDependencyMethodImpl.ReturnExpression.Parameter -> "param:${expr.parameterName}"
-          is ChildDependencyMethodImpl.ReturnExpression.Provider -> "provider:${expr.providerName}"
-        }
-        "${method.name}:${method.returnTypeName.j}:$source"
-      })
-
-      return parts.joinToString("|")
     }
 
     // === Selective Caching Logic for SMART_CACHE ===

@@ -65,12 +65,6 @@ class ScopeImpl(
      * Null for normal implementations and wrapper classes.
      */
     val variantSuffix: String? = null,
-    /**
-     * Static dependency classes for child scopes (SMART_CACHE strategy only).
-     * These replace anonymous classes to reduce memory overhead by avoiding closure captures.
-     * Empty for BASELINE strategies.
-     */
-    val staticDependencyClasses: List<StaticDependencyClass> = emptyList(),
 )
 
 /**
@@ -206,21 +200,6 @@ class ChildDependenciesImpl(
     val methods: List<ChildDependencyMethodImpl>,
     val isAbstractClass: Boolean,
     val env: XProcessingEnv,
-    /**
-     * True if this child dependencies should use a static class instead of anonymous class.
-     * Used for SMART_CACHE strategy to reduce memory overhead.
-     */
-    val useStaticClass: Boolean = false,
-    /**
-     * Name of the static class to instantiate (e.g., "PhotoGridScopeDependencies").
-     * Null if using anonymous class.
-     */
-    val staticClassName: String? = null,
-    /**
-     * Parent scope's class name, used for static class field reference.
-     * Null if using anonymous class.
-     */
-    val parentScopeClassName: ClassName? = null,
 )
 
 /**
@@ -465,38 +444,6 @@ class ObjectsAbstractMethod(
     // Required work around https://github.com/square/javapoet/issues/656
     val env: XProcessingEnv,
     val overriddenMethod: CompilerMethod,
-)
-
-/**
- * Static dependency class for child scopes (SMART_CACHE strategy).
- *
- * Replaces anonymous classes to reduce memory overhead by avoiding closure captures.
- * ```
- * private static class PhotoGridScopeDependencies implements PhotoGridScope.Dependencies {
- *     private final RootScopeImpl parentScope;
- *     private final ViewGroup viewGroup;
- *
- *     PhotoGridScopeDependencies(RootScopeImpl parentScope, ViewGroup viewGroup) {
- *         this.parentScope = parentScope;
- *         this.viewGroup = viewGroup;
- *     }
- *
- *     @Override
- *     public ViewGroup viewGroup() { return viewGroup; }
- *
- *     @Override
- *     public Database database() { return parentScope.database(); }
- * }
- * ```
- */
-class StaticDependencyClass(
-    val className: String,
-    val childDependenciesClassName: ClassName,
-    val parentScopeClassName: ClassName,
-    val isAbstractClass: Boolean,
-    val methods: List<ChildDependencyMethodImpl>,
-    val methodParameters: List<ChildMethodImplParameter>,
-    val env: XProcessingEnv,
 )
 
 class TypeName private constructor(private val mirror: XType) {

@@ -91,7 +91,6 @@ object JavaCodeGenerator {
             addMethod(scopeProviderMethod.spec())
             factoryProviderMethods.forEach { addMethods(it.specs(isBaselineStrategy, perDependencyLockFields)) }
             dependencyProviderMethods.forEach { addMethod(it.spec()) }
-            staticDependencyClasses.forEach { addType(it.spec()) }
             dependencies?.let { addType(it.spec()) }
             objectsImpl?.let { addType(it.spec()) }
           }
@@ -182,6 +181,9 @@ object JavaCodeGenerator {
 
           // Add Objects nested class if present (for variants to reference)
           objectsImpl?.let { addType(it.spec()) }
+
+          // Add Dependencies interface so variant implementations can reference it
+          dependencies?.let { addType(it.spec()) }
         }
         .build()
   }
@@ -265,33 +267,7 @@ object JavaCodeGenerator {
           .build()
 
   @OptIn(KotlinPoetJavaPoetPreview::class)
-  private fun ChildDependenciesImpl.spec(): CodeBlock {
-    if (useStaticClass) {
-      // Use static class instantiation
-      val args = mutableListOf<Any>()
-      val argFormats = mutableListOf<String>()
-
-      // First argument is always "this" (parent scope reference)
-      args.add("this")
-      argFormats.add("\$N")
-
-      // Add parameter arguments based on ChildDependencyMethodImpl that use parameters
-      methods.forEach { method ->
-        when (val expr = method.returnExpression) {
-          is ChildDependencyMethodImpl.ReturnExpression.Parameter -> {
-            args.add(expr.parameterName)
-            argFormats.add("\$N")
-          }
-          else -> {} // Providers don't need args, they use parentScope field
-        }
-      }
-
-      return CodeBlock.of("new \$N(${argFormats.joinToString(", ")})", staticClassName!!, *args.toTypedArray())
-    } else {
-      // Use anonymous class (original behavior)
-      return CodeBlock.of("\$L", spec_anonymousClass())
-    }
-  }
+  private fun ChildDependenciesImpl.spec(): CodeBlock = CodeBlock.of("\$L", spec_anonymousClass())
 
   @OptIn(KotlinPoetJavaPoetPreview::class)
   private fun ChildDependenciesImpl.spec_anonymousClass(): TypeSpec {
@@ -299,7 +275,7 @@ object JavaCodeGenerator {
     return TypeSpec.anonymousClassBuilder("")
         .apply {
           addSuperinterface(childDependenciesClassName.j)
-          methods.forEach { addMethod(it.spec(env, isKotlinDepInterface, useStaticClass = false)) }
+          methods.forEach { addMethod(it.spec(env, isKotlinDepInterface)) }
         }
         .build()
   }
@@ -307,7 +283,6 @@ object JavaCodeGenerator {
   private fun ChildDependencyMethodImpl.spec(
       env: XProcessingEnv,
       isKotlinDependenciesInterface: Boolean,
-      useStaticClass: Boolean = false,
   ): MethodSpec =
       MethodSpec.methodBuilder(name)
           .addAnnotation(Override::class.java)
@@ -319,102 +294,23 @@ object JavaCodeGenerator {
                 returnTypeName.j
               },
           )
-          .addStatement(returnExpression.spec(useStaticClass))
+          .addStatement(returnExpression.spec())
           .build()
 
-  private fun ChildDependencyMethodImpl.ReturnExpression.spec(useStaticClass: Boolean = false): CodeBlock =
+  private fun ChildDependencyMethodImpl.ReturnExpression.spec(): CodeBlock =
       when (this) {
         is ChildDependencyMethodImpl.ReturnExpression.Parameter -> spec()
-        is ChildDependencyMethodImpl.ReturnExpression.Provider -> spec(useStaticClass)
+        is ChildDependencyMethodImpl.ReturnExpression.Provider -> spec()
       }
 
   private fun ChildDependencyMethodImpl.ReturnExpression.Parameter.spec(): CodeBlock =
       CodeBlock.of("return \$N", parameterName)
 
-  private fun ChildDependencyMethodImpl.ReturnExpression.Provider.spec(useStaticClass: Boolean = false): CodeBlock =
-      if (useStaticClass) {
-        CodeBlock.of("return parentScope.\$N()", providerName)
-      } else {
-        CodeBlock.of("return \$T.this.\$N()", scopeImplName.j, providerName)
-      }
+  private fun ChildDependencyMethodImpl.ReturnExpression.Provider.spec(): CodeBlock =
+      CodeBlock.of("return \$T.this.\$N()", scopeImplName.j, providerName)
 
   private fun ChildMethodImplParameter.spec(): ParameterSpec =
       ParameterSpec.builder(typeName.j, name, Modifier.FINAL).build()
-
-  /**
-   * Generates a static dependency class for SMART_CACHE strategy.
-   * Example:
-   * ```
-   * private static class PhotoGridScopeDependencies implements PhotoGridScope.Dependencies {
-   *     private final RootScopeImpl parentScope;
-   *     private final ViewGroup viewGroup;
-   *
-   *     PhotoGridScopeDependencies(RootScopeImpl parentScope, ViewGroup viewGroup) {
-   *         this.parentScope = parentScope;
-   *         this.viewGroup = viewGroup;
-   *     }
-   *
-   *     @Override
-   *     public ViewGroup viewGroup() { return viewGroup; }
-   *
-   *     @Override
-   *     public Database database() { return parentScope.database(); }
-   * }
-   * ```
-   */
-  @OptIn(KotlinPoetJavaPoetPreview::class)
-  private fun StaticDependencyClass.spec(): TypeSpec {
-    val isKotlinDepInterface = env.findTypeElement(childDependenciesClassName.j).isKotlinSource(env)
-
-    return TypeSpec.classBuilder(className)
-        .addModifiers(Modifier.PRIVATE, Modifier.STATIC)
-        .apply {
-          if (isAbstractClass) {
-            addModifiers(Modifier.ABSTRACT)
-          }
-        }
-        .addSuperinterface(childDependenciesClassName.j)
-        .apply {
-          // Add parentScope field
-          addField(
-              FieldSpec.builder(parentScopeClassName.j, "parentScope", Modifier.PRIVATE, Modifier.FINAL)
-                  .build()
-          )
-
-          // Add parameter fields
-          methodParameters.forEach { param ->
-            addField(
-                FieldSpec.builder(param.typeName.j, param.name, Modifier.PRIVATE, Modifier.FINAL)
-                    .build()
-            )
-          }
-
-          // Add constructor
-          addMethod(
-              MethodSpec.constructorBuilder()
-                  .addParameter(parentScopeClassName.j, "parentScope")
-                  .apply {
-                    methodParameters.forEach { param ->
-                      addParameter(param.typeName.j, param.name)
-                    }
-                  }
-                  .addStatement("this.parentScope = parentScope")
-                  .apply {
-                    methodParameters.forEach { param ->
-                      addStatement("this.\$N = \$N", param.name, param.name)
-                    }
-                  }
-                  .build()
-          )
-
-          // Add dependency methods
-          methods.forEach { method ->
-            addMethod(method.spec(env, isKotlinDepInterface, useStaticClass = true))
-          }
-        }
-        .build()
-  }
-
 
   private fun ScopeProviderMethod.spec(): MethodSpec =
       MethodSpec.methodBuilder(name).returns(scopeClassName.j).addStatement("return this").build()

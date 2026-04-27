@@ -28,7 +28,7 @@ import motif.sample.lib.controller.ControllerObjects;
 import motif.sample.lib.db.Database;
 import motif.sample.lib.multiselect.MultiSelector;
 
-@Scope(cachingStrategy = CachingStrategy.SMART_CACHE)
+@Scope(cachingStrategy = CachingStrategy.RUNTIME_SELECTABLE)
 public interface RootScope {
 
   RootView view();
